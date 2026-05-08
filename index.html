@@ -2,98 +2,208 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>POS CSV → Full Sales Format (JSON items, ISO timestamps, booleans)</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+    <title>Sales Transformer | IRS Report (Card Only) + Full Export</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
     <style>
-        * { box-sizing: border-box; margin: 0; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
         body {
-            background: #f0f4f8;
-            font-family: system-ui, 'Segoe UI', Roboto, sans-serif;
-            padding: 2rem;
-            color: #1e293b;
+            background: linear-gradient(145deg, #e9f0f5 0%, #d9e2ec 100%);
+            font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+            padding: 2rem 1rem;
+            color: #1a2c3e;
         }
+
+        .container { max-width: 1400px; margin: 0 auto; }
+
         .card {
-            max-width: 1300px;
-            margin: 0 auto;
-            background: white;
+            background: rgba(255, 255, 255, 0.96);
             border-radius: 2rem;
-            padding: 2rem;
-            box-shadow: 0 20px 35px -12px rgba(0,0,0,0.1);
+            box-shadow: 0 20px 35px -12px rgba(0, 0, 0, 0.2), 0 1px 2px rgba(0, 0, 0, 0.05);
+            padding: 1.8rem 2rem;
+            margin-bottom: 2rem;
+            border: 1px solid rgba(255,255,255,0.4);
         }
-        h1 { font-size: 1.8rem; margin-bottom: 0.5rem; background: linear-gradient(135deg, #1e3c4a, #2b6e4e); -webkit-background-clip: text; background-clip: text; color: transparent; }
-        .sub { color: #2c5f6e; border-left: 4px solid #2b6e4e; padding-left: 1rem; margin-bottom: 1.5rem; }
+
+        h1 {
+            font-size: 1.9rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, #1f4e6e, #2b7a4b);
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+        }
+
+        .sub {
+            color: #2c5a6e;
+            margin-top: 0.3rem;
+            border-left: 4px solid #2b7a4b;
+            padding-left: 1rem;
+            font-weight: 500;
+        }
+
         .file-zone {
-            border: 2px dashed #94a3b8;
+            border: 2px dashed #8ba5b9;
             border-radius: 1.5rem;
-            padding: 2rem;
+            background: #fefefe;
+            padding: 1.8rem 1rem;
             text-align: center;
             cursor: pointer;
-            background: #fefcfb;
             transition: 0.2s;
-            margin: 1rem 0;
+            margin: 1rem 0 1.2rem 0;
         }
-        .file-zone:hover { border-color: #2b6e4e; background: #f0f9f4; }
-        .btn-group { display: flex; gap: 1rem; margin: 1rem 0; flex-wrap: wrap; }
+        .file-zone:hover { border-color: #2b7a4b; background: #f3f9fc; }
+
+        .btn-group {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem;
+            margin: 1rem 0;
+            align-items: center;
+        }
+
         .btn {
             border: none;
-            padding: 0.7rem 1.8rem;
-            border-radius: 60px;
-            font-weight: 600;
-            cursor: pointer;
-            background: #1f4e6a;
+            background: #1f4e6e;
             color: white;
+            font-weight: 600;
+            padding: 0.7rem 1.5rem;
+            border-radius: 60px;
+            cursor: pointer;
+            transition: 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
         }
-        .btn-primary { background: #2b6e4e; }
-        .btn-primary:hover { background: #1e593e; }
-        .btn-secondary { background: #475569; }
-        .preview-wrapper { overflow-x: auto; margin-top: 1.5rem; border-radius: 1rem; border: 1px solid #cbd5e1; background: white; }
-        table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
-        th { background: #e9f0f5; padding: 0.8rem; text-align: left; }
-        td { padding: 0.6rem; border-bottom: 1px solid #e9edf2; font-family: monospace; }
-        .alert { background: #fffbeb; border-left: 5px solid #f59e0b; padding: 0.8rem 1rem; margin: 1rem 0; border-radius: 1rem; }
-        .success { background: #e0f2e9; border-left-color: #2b6e4e; }
-        .info-badge { background: #eef3fa; padding: 0.2rem 1rem; border-radius: 40px; font-size: 0.75rem; }
-        footer { text-align: center; margin-top: 2rem; font-size: 0.75rem; color: #5f7f9a; }
+        .btn-primary { background: #2b7a4b; }
+        .btn-primary:hover { background: #1f5e3a; transform: translateY(-2px); }
+        .btn-secondary { background: #3a6b8c; }
+        .btn-secondary:hover { background: #2c577a; }
+        .btn-irs { background: #b85c1a; }
+        .btn-irs:hover { background: #9a4413; transform: translateY(-2px); }
+
+        .info-badge {
+            background: #eef3fa;
+            border-radius: 28px;
+            padding: 0.4rem 1rem;
+            font-size: 0.85rem;
+            font-family: monospace;
+            color: #1f4e6e;
+        }
+
+        .preview-wrapper {
+            overflow-x: auto;
+            margin-top: 1.2rem;
+            border-radius: 20px;
+            border: 1px solid #cbdde6;
+            background: #ffffff;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.8rem;
+            min-width: 700px;
+        }
+        th {
+            background: #e2edf2;
+            padding: 0.8rem 0.6rem;
+            text-align: left;
+            font-weight: 700;
+            color: #1f3e4c;
+        }
+        td {
+            padding: 0.6rem;
+            border-bottom: 1px solid #e2edf2;
+            font-family: monospace;
+        }
+
+        .alert {
+            background: #feeed6;
+            border-left: 5px solid #e67e22;
+            border-radius: 1rem;
+            padding: 0.8rem 1.2rem;
+            margin: 1rem 0;
+            font-size: 0.85rem;
+        }
+        .success { background: #e0f2e9; border-left-color: #2b7a4b; }
+
+        footer {
+            text-align: center;
+            font-size: 0.75rem;
+            margin-top: 1rem;
+            opacity: 0.7;
+        }
+        hr {
+            margin: 1rem 0;
+            border: 0;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, #abc0cd, transparent);
+        }
+        .flex-between {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+        }
     </style>
 </head>
 <body>
-<div class="card">
-    <h1>📦 POS CSV → Full Sales Format</h1>
-    <div class="sub">Converts your CSV to the exact schema shown (TX‑N38xxx, ISO timestamp, JSON items, boolean flags)</div>
-
-    <div class="file-zone" id="dropZone">
-        📂 Drag & drop or click to upload your POS CSV<br>
-        <small style="color:#64748b;">Expects columns: Date, Receipt number, Description (JSON array), Net sales, Payment type, Store, Cashier name, Discounts ...</small>
-        <input type="file" id="fileInput" accept=".csv" style="display: none;">
-    </div>
-
-    <div class="btn-group">
-        <button class="btn btn-primary" id="downloadBtn" disabled>⬇️ Download converted CSV (target format)</button>
-        <button class="btn btn-secondary" id="resetBtn">⟳ Reset</button>
-    </div>
-
-    <div id="statusMsg"></div>
-    <div id="warningArea" class="alert" style="display: none;"></div>
-
-    <div id="previewSection">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
-            <strong>🔍 Preview (first 5 converted rows)</strong>
-            <span id="rowCountBadge" class="info-badge">— rows</span>
+<div class="container">
+    <div class="card">
+        <div class="flex-between">
+            <div>
+                <h1>🧾 POS → Universal Sales Converter</h1>
+                <div class="sub">Full export + IRS Report (card payments only) • Auto‑skip cancelled</div>
+            </div>
+            <div class="info-badge">💳 IRS = only "Card" transactions</div>
         </div>
-        <div class="preview-wrapper" id="previewContainer">
-            <div style="padding: 2rem; text-align: center; color: #6d8eaa;">No file loaded.</div>
+        <hr>
+        <div>
+            <p style="margin-bottom: 12px; font-weight: 500;">📁 Upload CSV – any date format → ISO 8601 UTC.<br>✅ <strong>Cancelled orders are ignored. IRS report includes only Credit/Debit card payments.</strong></p>
+            <div class="file-zone" id="dropZone">
+                📂 Drag & drop or <strong>click to browse</strong><br>
+                <span style="font-size: 0.75rem; color: #517a92;">Dates → "2026-05-08T12:23:00.000Z" – cancelled orders excluded – IRS = Card only</span>
+                <input type="file" id="fileInput" accept=".csv" style="display: none;">
+            </div>
+
+            <div class="btn-group">
+                <button class="btn btn-primary" id="downloadBtn" disabled>⬇️ Full Schema CSV (all payments)</button>
+                <button class="btn btn-irs" id="downloadIrsBtn" disabled>📄 IRS Report CSV (Card payments only)</button>
+                <button class="btn btn-secondary" id="resetBtn">⟳ Clear & Reset</button>
+            </div>
+
+            <div id="statusMessage"></div>
+            <div id="warningArea" class="alert" style="display: none;"></div>
+
+            <div id="previewSection" style="margin-top: 1.5rem;">
+                <div class="flex-between">
+                    <strong>🔍 Preview (first 5 rows, all kept after cancel filter)</strong>
+                    <span id="rowCountBadge" class="info-badge">— rows</span>
+                </div>
+                <div class="preview-wrapper" id="previewTableContainer">
+                    <div style="padding: 2rem; text-align: center; color: #6d8eaa;">No file loaded. Upload CSV to see mapping preview.</div>
+                </div>
+            </div>
         </div>
     </div>
+    <footer>
+        🧾 <strong>Filter:</strong> Status = "Cancelled" → row skipped (both exports). <br>
+        🏬 Store codes: "URBAN • LIVING @ GURNEY PARAGON" → gurney_paragon | "… @ SUNSHINE CENTRAL" → sunshine | "… @ QB 1" → queens | "… @ SPECIAL EVENT" → gurney_paragon <br>
+        💳 <strong>IRS Report</strong> only includes rows where payment_method = "Card" (after normalization). Full export contains all payments.
+    </footer>
 </div>
-<footer>
-    🧾 <strong>Mapping rules:</strong> Receipt number → transaction_id &nbsp;|&nbsp; Date → ISO timestamp &nbsp;|&nbsp; Description (JSON) → items<br>
-    Net sales → total &nbsp;|&nbsp; Payment type → payment_method &nbsp;|&nbsp; Store → store &nbsp;|&nbsp; Cashier name → sales_person_name & sales_person_id<br>
-    Discounts → discount &nbsp;|&nbsp; settled = TRUE, refunded = FALSE &nbsp;|&nbsp; All other fields blank/0.
-</footer>
 
 <script>
-    // ---------- Target column order (exactly as in your sample) ----------
+    // Expected source columns (POS header)
+    const EXPECTED_SOURCE_COLS = [
+        "Date", "Receipt number", "Receipt type", "Gross sales", "Discounts", "Net sales",
+        "Taxes", "Total collected", "Cost of goods", "Gross profit", "Payment type",
+        "Description", "Dining option", "POS", "Store", "Cashier name",
+        "Customer name", "Customer contacts", "Status"
+    ];
+
     const TARGET_COLUMNS = [
         "transaction_id", "timestamp", "items", "total", "payment_method", "cash_received",
         "store", "employee_id", "settled", "refunded", "refund_of", "original_payment_method",
@@ -101,287 +211,335 @@
         "custom_discount", "refunded_by", "staff_discount", "sales_person_name", "sales_person_id"
     ];
 
-    // Expected source columns (case‑insensitive fallback)
-    const EXPECTED_SOURCE = [
-        "Date", "Receipt number", "Description", "Net sales", "Payment type",
-        "Store", "Cashier name", "Discounts", "Dining option"   // dining option optional
-    ];
+    // IRS report columns (in desired order)
+    const IRS_COLUMNS = ["invoice_no", "transaction_id", "timestamp", "items", "total", "store", "employee_id"];
 
-    let convertedData = [];     // array of objects (target format)
-    let headerMapping = {};     // expected -> actual column name
-
-    // Helper: show warning/error messages
-    function showMessage(msg, isError = false) {
-        const warnDiv = document.getElementById("warningArea");
-        warnDiv.style.display = "block";
-        warnDiv.innerHTML = msg;
-        warnDiv.className = "alert";
-        if (!isError) warnDiv.classList.add("success");
-        setTimeout(() => { if (warnDiv.innerHTML === msg) warnDiv.style.display = "none"; }, 4000);
-    }
-
-    // Convert a date string from source to ISO string (with timezone = UTC to match sample)
-    function toISOTimestamp(dateValue) {
-        if (!dateValue) return "";
-        let d = new Date(dateValue);
-        if (isNaN(d.getTime())) {
-            // try parse manually if needed
-            const parts = String(dateValue).match(/(\d{4})-(\d{2})-(\d{2})(?:\s+(\d{2}):(\d{2}):(\d{2}))?/);
-            if (parts) {
-                const [, year, month, day, hour = 0, minute = 0, second = 0] = parts;
-                d = new Date(Date.UTC(year, month-1, day, hour, minute, second));
-            } else {
-                return String(dateValue);
+    // ----- DATE NORMALIZATION (ISO 8601 with milliseconds and Z) -----
+    function toISOStringWithMs(dateInput) {
+        if (!dateInput || dateInput === "") return "";
+        let rawStr = String(dateInput).trim();
+        
+        if (/^\d+(\.\d+)?$/.test(rawStr) && parseFloat(rawStr) > 1000 && parseFloat(rawStr) < 100000) {
+            const excelEpoch = new Date(Date.UTC(1899, 11, 30));
+            const days = parseFloat(rawStr);
+            const ms = days * 86400000;
+            const date = new Date(excelEpoch.getTime() + ms);
+            if (!isNaN(date.getTime())) return date.toISOString();
+        }
+        
+        let parsedDate = new Date(rawStr);
+        if (!isNaN(parsedDate.getTime())) {
+            let iso = parsedDate.toISOString();
+            if (iso.includes('Z') && !iso.includes('.') && iso.includes('T')) {
+                iso = iso.replace('Z', '.000Z');
+            } else if (iso.includes('.') && iso.split('.')[1].length < 3) {
+                iso = iso.replace(/\.(\d{1,2})Z/, (_, p1) => '.' + p1.padEnd(3, '0') + 'Z');
+            }
+            return iso;
+        }
+        
+        const patterns = [
+            /^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})(?:\s+(\d{1,2}):(\d{1,2})(?::(\d{1,2})(?:\.(\d{1,3}))?)?)?$/,
+            /^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})(?:\s+(\d{1,2}):(\d{1,2})(?::(\d{1,2})(?:\.(\d{1,3}))?)?)?$/
+        ];
+        for (const regex of patterns) {
+            const match = rawStr.match(regex);
+            if (match) {
+                let year, month, day, hour=0, minute=0, second=0, ms=0;
+                if (match[1].length === 4) {
+                    year = parseInt(match[1],10);
+                    month = parseInt(match[2],10)-1;
+                    day = parseInt(match[3],10);
+                } else {
+                    year = parseInt(match[3],10);
+                    month = parseInt(match[1],10)-1;
+                    day = parseInt(match[2],10);
+                }
+                if (match[4]) hour = parseInt(match[4],10);
+                if (match[5]) minute = parseInt(match[5],10);
+                if (match[6]) second = parseInt(match[6],10);
+                if (match[7]) ms = parseInt(match[7].padEnd(3,'0'),10);
+                const date = new Date(Date.UTC(year, month, day, hour, minute, second, ms));
+                if (!isNaN(date.getTime())) return date.toISOString();
             }
         }
-        // output as ISO string with milliseconds zero-padded (like sample)
-        return d.toISOString();
+        return rawStr;
     }
 
-    // Build mapping from actual CSV headers to expected ones (case‑insensitive)
-    function buildMapping(actualHeaders) {
+    // ----- STORE NORMALIZATION -----
+    const STORE_NORMALIZATION_MAP = new Map([
+        ["URBAN • LIVING @ GURNEY PARAGON", "gurney_paragon"],
+        ["URBAN • LIVING @ SUNSHINE CENTRAL", "sunshine"],
+        ["URBAN • LIVING @ QB 1", "queens"],
+        ["URBAN • LIVING @ SPECIAL EVENT", "gurney_paragon"]
+    ]);
+    
+    function normalizeStoreName(rawStore) {
+        if (!rawStore || typeof rawStore !== 'string') return "";
+        const trimmed = rawStore.trim();
+        if (STORE_NORMALIZATION_MAP.has(trimmed)) return STORE_NORMALIZATION_MAP.get(trimmed);
+        const lowerTrimmed = trimmed.toLowerCase();
+        for (let [key, value] of STORE_NORMALIZATION_MAP.entries()) {
+            if (key.toLowerCase() === lowerTrimmed) return value;
+        }
+        if (lowerTrimmed.includes("gurney paragon") || lowerTrimmed.includes("gurney")) return "gurney_paragon";
+        if (lowerTrimmed.includes("sunshine central") || lowerTrimmed.includes("sunshine")) return "sunshine";
+        if (lowerTrimmed.includes("qb 1") || lowerTrimmed.includes("queensbay")) return "queens";
+        if (lowerTrimmed.includes("special event")) return "gurney_paragon";
+        return trimmed;
+    }
+
+    // ----- PAYMENT NORMALIZATION -----
+    const PAYMENT_NORMALIZATION_MAP = {
+        "credit/debit card": "Card",
+        "debit card": "Card",
+        "credit card": "Card",
+        "tng / qr pay": "QR Pay",
+        "tng": "QR Pay",
+        "qr pay": "QR Pay",
+        "qrcode": "QR Pay",
+        "cash": "Cash"
+    };
+
+    function normalizePaymentMethod(rawValue) {
+        if (!rawValue || typeof rawValue !== 'string') return "";
+        const trimmed = rawValue.trim().toLowerCase();
+        if (PAYMENT_NORMALIZATION_MAP[trimmed]) return PAYMENT_NORMALIZATION_MAP[trimmed];
+        if (trimmed.includes("credit") || trimmed.includes("debit")) return "Card";
+        if (trimmed.includes("tng") || trimmed.includes("qr pay") || trimmed.includes("qrcode")) return "QR Pay";
+        return rawValue.trim().replace(/\b\w/g, c => c.toUpperCase());
+    }
+
+    // ----- HELPER: check if a row should be skipped based on Status -----
+    function isCancelled(row, headerMap) {
+        const statusCol = headerMap["Status"];
+        if (!statusCol) return false;
+        const statusValue = row[statusCol];
+        if (statusValue === undefined || statusValue === null) return false;
+        const statusStr = String(statusValue).trim().toLowerCase();
+        return statusStr === "cancelled";
+    }
+
+    let mappedData = [];      // array of transformed objects (full schema)
+    let columnMappingLookup = {};
+    let isDataReady = false;
+    let skippedCancelledCount = 0;
+
+    function buildHeaderMapping(actualHeaders) {
         const mapping = {};
-        const lowerActual = actualHeaders.map(h => h.trim().toLowerCase());
-        EXPECTED_SOURCE.forEach(exp => {
-            const lowerExp = exp.toLowerCase();
-            const idx = lowerActual.findIndex(act => act === lowerExp);
-            if (idx !== -1) mapping[exp] = actualHeaders[idx];
-            else mapping[exp] = null;
+        const normalizedActual = actualHeaders.map(h => ({ original: h, trimmed: h.trim() }));
+        EXPECTED_SOURCE_COLS.forEach(expected => {
+            const trimmedExpected = expected.trim();
+            let found = actualHeaders.find(h => h === expected);
+            if (!found) found = normalizedActual.find(item => item.trimmed === trimmedExpected)?.original;
+            if (!found) {
+                const lowerExpected = trimmedExpected.toLowerCase();
+                found = normalizedActual.find(item => item.trimmed.toLowerCase() === lowerExpected)?.original;
+            }
+            mapping[expected] = found || null;
         });
         return mapping;
     }
 
-    // Get a value from the row using the expected column name
-    function getVal(row, expectedCol, mapping) {
-        const actual = mapping[expectedCol];
-        if (!actual) return "";
-        const val = row[actual];
+    function getSourceValue(row, expectedColName, mappingDict) {
+        const actualKey = mappingDict[expectedColName];
+        if (!actualKey) return "";
+        const val = row[actualKey];
         return (val !== undefined && val !== null) ? String(val) : "";
     }
 
-    // Transform one row of source CSV into target object
-    function transformRow(row, mapping) {
-        const receipt = getVal(row, "Receipt number", mapping);
-        const dateRaw = getVal(row, "Date", mapping);
-        const description = getVal(row, "Description", mapping);   // should be JSON string
-        const netSales = getVal(row, "Net sales", mapping);
-        const payment = getVal(row, "Payment type", mapping);
-        const store = getVal(row, "Store", mapping);
-        const cashierName = getVal(row, "Cashier name", mapping);
-        const discounts = getVal(row, "Discounts", mapping);
-        const diningOpt = getVal(row, "Dining option", mapping);   // fallback for employee_id
-
-        // Decide employee_id: try to use Dining option, else cashier name, else blank
-        let employeeId = diningOpt || cashierName || "";
-
-        // Build target object with all required fields
+    function transformRow(originalRow, headerMap) {
+        const receiptNumber = getSourceValue(originalRow, "Receipt number", headerMap);
+        let rawDate = getSourceValue(originalRow, "Date", headerMap);
+        const descriptionVal = getSourceValue(originalRow, "Description", headerMap);
+        const netSalesVal = getSourceValue(originalRow, "Net sales", headerMap);
+        let rawPayment = getSourceValue(originalRow, "Payment type", headerMap);
+        let rawStore = getSourceValue(originalRow, "Store", headerMap);
+        const diningOptionVal = getSourceValue(originalRow, "Dining option", headerMap);
+        const discountsVal = getSourceValue(originalRow, "Discounts", headerMap);
+        
+        const isoTimestamp = toISOStringWithMs(rawDate);
+        
         return {
-            transaction_id: receipt,
-            timestamp: toISOTimestamp(dateRaw),
-            items: description,                 // keep the JSON string as-is
-            total: netSales,
-            payment_method: payment,
+            transaction_id: receiptNumber || "",
+            timestamp: isoTimestamp,
+            items: descriptionVal || "",
+            total: netSalesVal || "",
+            payment_method: normalizePaymentMethod(rawPayment),
             cash_received: "",
-            store: store,
-            employee_id: employeeId,
-            settled: "TRUE",                    // hardcoded to match your sample
-            refunded: "FALSE",
+            store: normalizeStoreName(rawStore),
+            employee_id: diningOptionVal || "",
+            settled: "",
+            refunded: "",
             refund_of: "",
             original_payment_method: "",
             customer_id: "",
             points_awarded: "",
-            discount: discounts,
-            buy2_free1_discount: "0",
-            buy3_free1_discount: "0",
-            custom_discount: "0",
+            discount: discountsVal || "",
+            buy2_free1_discount: "",
+            buy3_free1_discount: "",
+            custom_discount: "",
             refunded_by: "",
-            staff_discount: "0",
-            sales_person_name: cashierName,
-            sales_person_id: employeeId
+            staff_discount: "",
+            sales_person_name: diningOptionVal || "",
+            sales_person_id: ""
         };
     }
 
-    // Process all rows
-    function convertAllRows(parsedRows, mapping) {
-        const result = [];
+    function processFullTransformation(parsedRows, headerMapping) {
+        const transformed = [];
+        skippedCancelledCount = 0;
         for (const row of parsedRows) {
-            if (!row || Object.keys(row).length === 0) continue;
-            // skip rows that have no receipt number (optional)
-            const receipt = getVal(row, "Receipt number", mapping);
-            if (!receipt) continue;
-            result.push(transformRow(row, mapping));
+            if (row && Object.keys(row).length === 0) continue;
+            if (isCancelled(row, headerMapping)) {
+                skippedCancelledCount++;
+                continue;
+            }
+            transformed.push(transformRow(row, headerMapping));
         }
-        return result;
+        return transformed;
     }
 
-    // Render preview table (limited columns for readability)
+    // IRS report rows: filter for payment_method === "Card"
+    function getIrsRows(fullData) {
+        const cardRows = fullData.filter(row => row.payment_method === "Card");
+        return cardRows.map(row => ({
+            invoice_no: row.transaction_id,
+            transaction_id: row.transaction_id,
+            timestamp: row.timestamp,
+            items: row.items,
+            total: row.total,
+            store: row.store,
+            employee_id: row.employee_id
+        }));
+    }
+
     function renderPreview(dataArray) {
-        const container = document.getElementById("previewContainer");
-        const badge = document.getElementById("rowCountBadge");
-        if (!dataArray.length) {
-            container.innerHTML = `<div style="padding:2rem; text-align:center;">No converted data to preview.</div>`;
-            badge.innerText = "0 rows";
+        const container = document.getElementById("previewTableContainer");
+        if (!dataArray || dataArray.length === 0) {
+            container.innerHTML = `<div style="padding: 2rem; text-align: center; color: #6d8eaa;">📭 No data after filtering cancelled rows.</div>`;
+            document.getElementById("rowCountBadge").innerText = `0 rows`;
             return;
         }
-        badge.innerText = `${dataArray.length} rows`;
         const previewRows = dataArray.slice(0, 5);
-        const showCols = ["transaction_id", "timestamp", "items", "total", "payment_method", "store", "discount", "sales_person_name"];
-        let html = `<table><thead><tr>${showCols.map(c => `<th>${c}</th>`).join('')}</tr></thead><tbody>`;
+        const keyFields = ["transaction_id", "timestamp", "items", "total", "payment_method", "store", "discount"];
+        let html = `<table><thead><tr>${keyFields.map(f => `<th>${f}</th>`).join('')}</tr></thead><tbody>`;
         for (const row of previewRows) {
-            html += `<tr>`;
-            for (const col of showCols) {
-                let val = row[col] !== undefined ? String(row[col]) : "";
-                if (val.length > 70) val = val.substring(0, 67) + "...";
-                html += `<td title="${escapeHtml(String(row[col] || ''))}">${escapeHtml(val)}</td>`;
-            }
-            html += `</tr>`;
+            html += `<tr>${keyFields.map(f => `<td title="${escapeHtml(String(row[f] || ''))}">${escapeHtml((row[f] || '—').substring(0,40))}</td>`).join('')}</tr>`;
         }
-        html += `</tbody></table><div style="padding:0.5rem; background:#f8fafc; font-size:0.7rem;">Showing first 5 of ${dataArray.length} rows.</div>`;
+        html += `</tbody><table><div style="padding:0.5rem 0.7rem; background:#f8fbfe; font-size:0.7rem;">✅ Cancelled rows removed. IRS report will only include "Card" payments. Total kept: ${dataArray.length}</div>`;
         container.innerHTML = html;
+        document.getElementById("rowCountBadge").innerText = `${dataArray.length} rows`;
     }
 
-    function escapeHtml(str) {
-        if (!str) return "";
-        return str.replace(/[&<>]/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[m]));
+    function escapeHtml(str) { 
+        return str.replace(/[&<>]/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[m])); 
     }
 
-    // Download CSV
-    function downloadCSV(dataArray) {
-        if (!dataArray.length) {
-            showMessage("No data to export.", true);
-            return;
+    function downloadCSV(dataArray, columns, filename) {
+        if (!dataArray.length) { 
+            showWarning("No data to export for this report.", "warning"); 
+            return false; 
         }
-        const rows = [TARGET_COLUMNS.join(",")];
-        for (const row of dataArray) {
-            const rowValues = TARGET_COLUMNS.map(col => {
-                let val = row[col] !== undefined && row[col] !== null ? row[col] : "";
-                // escape for CSV
-                if (typeof val === "string" && (val.includes(",") || val.includes('"') || val.includes("\n"))) {
-                    val = '"' + val.replace(/"/g, '""') + '"';
-                }
-                return val;
-            });
-            rows.push(rowValues.join(","));
-        }
-        const blob = new Blob(["\uFEFF" + rows.join("\n")], { type: "text/csv;charset=utf-8;" });
+        const csvString = Papa.unparse({ fields: columns, data: dataArray.map(row => columns.map(col => row[col] ?? "")) }, { quotes: true });
+        const blob = new Blob(["\uFEFF" + csvString], { type: "text/csv;charset=utf-8;" });
         const link = document.createElement("a");
-        const url = URL.createObjectURL(blob);
-        link.href = url;
-        link.download = "sales_target_format.csv";
-        document.body.appendChild(link);
+        link.href = URL.createObjectURL(blob);
+        link.download = filename;
         link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
-        showMessage("✅ Download complete! File: sales_target_format.csv");
+        URL.revokeObjectURL(link.href);
+        return true;
     }
 
-    // Reset UI
-    function resetUI() {
-        convertedData = [];
-        headerMapping = {};
+    function showWarning(msg, type) {
+        const div = document.getElementById("warningArea");
+        div.style.display = "block";
+        div.innerHTML = msg;
+        div.className = "alert" + (type === "success" ? " success" : "");
+        setTimeout(() => { if (div.innerText === msg) div.style.display = "none"; }, 5000);
+    }
+
+    function resetEverything() {
+        mappedData = [];
+        isDataReady = false;
+        skippedCancelledCount = 0;
         document.getElementById("downloadBtn").disabled = true;
-        document.getElementById("previewContainer").innerHTML = `<div style="padding:2rem; text-align:center;">No file loaded.</div>`;
+        document.getElementById("downloadIrsBtn").disabled = true;
+        document.getElementById("previewTableContainer").innerHTML = `<div style="padding:2rem;text-align:center;">Ready for upload.</div>`;
         document.getElementById("rowCountBadge").innerText = "— rows";
-        document.getElementById("statusMsg").innerHTML = "";
         document.getElementById("fileInput").value = "";
-        showMessage("Reset done. Ready for new file.");
+        document.getElementById("statusMessage").innerHTML = "";
+        showWarning("Reset complete. Upload new CSV.", "success");
     }
 
-    // Main file handler
     function handleFile(file) {
-        resetUI();
+        if (!file) return;
+        resetEverything();
         Papa.parse(file, {
-            header: true,
-            skipEmptyLines: true,
+            header: true, skipEmptyLines: true,
             complete: (results) => {
-                if (results.errors.length) {
-                    console.warn(results.errors);
-                    showMessage(`Parsing warnings: ${results.errors.length} issues.`, true);
+                if (!results.data || results.data.length === 0) { showWarning("Empty CSV.", "warning"); return; }
+                const headers = results.meta.fields || [];
+                const headerMap = buildHeaderMapping(headers);
+                const transformed = processFullTransformation(results.data, headerMap);
+                if (!transformed.length) { 
+                    let msg = skippedCancelledCount > 0 ? `All ${skippedCancelledCount} rows were cancelled. Nothing to export.` : "No valid rows after mapping.";
+                    showWarning(msg, "warning"); 
+                    return; 
                 }
-                const data = results.data;
-                if (!data || data.length === 0) {
-                    showMessage("CSV has no data rows.", true);
-                    return;
-                }
-                const actualHeaders = results.meta.fields;
-                if (!actualHeaders || actualHeaders.length === 0) {
-                    showMessage("Invalid CSV: no headers.", true);
-                    return;
-                }
-                const mapping = buildMapping(actualHeaders);
-                headerMapping = mapping;
-
-                // Check essential columns
-                const missing = [];
-                if (!mapping["Receipt number"]) missing.push("Receipt number");
-                if (!mapping["Description"]) missing.push("Description (JSON)");
-                if (!mapping["Net sales"]) missing.push("Net sales");
-                if (!mapping["Date"]) missing.push("Date");
-                if (missing.length) {
-                    showMessage(`⚠️ Missing columns: ${missing.join(", ")}. Some fields will be empty.`, true);
-                } else {
-                    showMessage("✅ Mapping successful. Converting...");
-                }
-
-                const transformed = convertAllRows(data, mapping);
-                if (transformed.length === 0) {
-                    showMessage("No valid rows after transformation (missing receipt numbers?).", true);
-                    return;
-                }
-                convertedData = transformed;
+                mappedData = transformed;
+                isDataReady = true;
                 document.getElementById("downloadBtn").disabled = false;
-                renderPreview(convertedData);
-                document.getElementById("statusMsg").innerHTML = `<div class="info-badge">✅ ${transformed.length} rows converted. Ready for download.</div>`;
+                document.getElementById("downloadIrsBtn").disabled = false;
+                renderPreview(mappedData);
+                let filterMsg = skippedCancelledCount > 0 ? ` (🚫 skipped ${skippedCancelledCount} cancelled)` : "";
+                let cardCount = mappedData.filter(r => r.payment_method === "Card").length;
+                document.getElementById("statusMessage").innerHTML = `<div class="info-badge" style="background:#dcfce7;">✅ ${mappedData.length} rows kept${filterMsg}. 💳 Card transactions: ${cardCount} (IRS report will include these).</div>`;
             },
-            error: (err) => {
-                console.error(err);
-                showMessage("Error parsing CSV: " + (err.message || "unknown"), true);
-            }
+            error: (err) => { showWarning("Parse error: " + err.message, "warning"); }
         });
     }
 
-    // Event listeners
-    const dropZone = document.getElementById("dropZone");
-    const fileInput = document.getElementById("fileInput");
-    const downloadBtn = document.getElementById("downloadBtn");
-    const resetBtn = document.getElementById("resetBtn");
-
+    // Event binding
+    document.getElementById("fileInput").addEventListener("change", e => e.target.files[0] && handleFile(e.target.files[0]));
+    const dropZone = document.getElementById("dropZone"), fileInput = document.getElementById("fileInput");
     dropZone.addEventListener("click", () => fileInput.click());
-    dropZone.addEventListener("dragover", (e) => {
+    dropZone.addEventListener("dragover", e => { e.preventDefault(); dropZone.style.borderColor = "#2b7a4b"; dropZone.style.backgroundColor = "#f0f9f4"; });
+    dropZone.addEventListener("dragleave", () => { dropZone.style.borderColor = "#8ba5b9"; dropZone.style.backgroundColor = "#fefefe"; });
+    dropZone.addEventListener("drop", e => {
         e.preventDefault();
-        dropZone.style.borderColor = "#2b6e4e";
-        dropZone.style.backgroundColor = "#f0f9f4";
-    });
-    dropZone.addEventListener("dragleave", () => {
-        dropZone.style.borderColor = "#94a3b8";
-        dropZone.style.backgroundColor = "#fefcfb";
-    });
-    dropZone.addEventListener("drop", (e) => {
-        e.preventDefault();
-        dropZone.style.borderColor = "#94a3b8";
-        dropZone.style.backgroundColor = "#fefcfb";
+        dropZone.style.borderColor = "#8ba5b9";
+        dropZone.style.backgroundColor = "#fefefe";
         const files = e.dataTransfer.files;
-        if (files.length && files[0].name.endsWith(".csv")) {
-            handleFile(files[0]);
-            fileInput.files = files;
+        if (files && files[0] && files[0].name.endsWith(".csv")) { handleFile(files[0]); fileInput.files = files; }
+        else showWarning("Please drop a .csv file", "warning");
+    });
+    document.getElementById("resetBtn").addEventListener("click", resetEverything);
+    
+    document.getElementById("downloadBtn").addEventListener("click", () => { 
+        if (isDataReady && mappedData.length) {
+            downloadCSV(mappedData, TARGET_COLUMNS, "full_sales_export.csv");
+            showWarning(`Full schema CSV exported (${mappedData.length} rows).`, "success");
         } else {
-            showMessage("Please drop a valid .csv file.", true);
+            showWarning("No data to download.", "warning");
         }
     });
-
-    fileInput.addEventListener("change", (e) => {
-        if (e.target.files.length) handleFile(e.target.files[0]);
-    });
-
-    downloadBtn.addEventListener("click", () => {
-        if (!convertedData.length) {
-            showMessage("No converted data. Upload a CSV first.", true);
-            return;
+    
+    document.getElementById("downloadIrsBtn").addEventListener("click", () => {
+        if (isDataReady && mappedData.length) {
+            const irsRows = getIrsRows(mappedData);
+            if (irsRows.length === 0) {
+                showWarning("No card payments found. IRS report would be empty.", "warning");
+                return;
+            }
+            downloadCSV(irsRows, IRS_COLUMNS, "irs_report_card_only.csv");
+            showWarning(`IRS report exported (${irsRows.length} card transactions).`, "success");
+        } else {
+            showWarning("No data available for IRS report.", "warning");
         }
-        downloadCSV(convertedData);
     });
-
-    resetBtn.addEventListener("click", resetUI);
+    
+    resetEverything();
 </script>
 </body>
 </html>
