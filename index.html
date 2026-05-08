@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>POS CSV → Full Sales Format (JSON items, ISO timestamps, booleans)</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; }
+        body {
+            background: #f0f4f8;
+            font-family: system-ui, 'Segoe UI', Roboto, sans-serif;
+            padding: 2rem;
+            color: #1e293b;
+        }
+        .card {
+            max-width: 1300px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 2rem;
+            padding: 2rem;
+            box-shadow: 0 20px 35px -12px rgba(0,0,0,0.1);
+        }
+        h1 { font-size: 1.8rem; margin-bottom: 0.5rem; background: linear-gradient(135deg, #1e3c4a, #2b6e4e); -webkit-background-clip: text; background-clip: text; color: transparent; }
+        .sub { color: #2c5f6e; border-left: 4px solid #2b6e4e; padding-left: 1rem; margin-bottom: 1.5rem; }
+        .file-zone {
+            border: 2px dashed #94a3b8;
+            border-radius: 1.5rem;
+            padding: 2rem;
+            text-align: center;
+            cursor: pointer;
+            background: #fefcfb;
+            transition: 0.2s;
+            margin: 1rem 0;
+        }
+        .file-zone:hover { border-color: #2b6e4e; background: #f0f9f4; }
+        .btn-group { display: flex; gap: 1rem; margin: 1rem 0; flex-wrap: wrap; }
+        .btn {
+            border: none;
+            padding: 0.7rem 1.8rem;
+            border-radius: 60px;
+            font-weight: 600;
+            cursor: pointer;
+            background: #1f4e6a;
+            color: white;
+        }
+        .btn-primary { background: #2b6e4e; }
+        .btn-primary:hover { background: #1e593e; }
+        .btn-secondary { background: #475569; }
+        .preview-wrapper { overflow-x: auto; margin-top: 1.5rem; border-radius: 1rem; border: 1px solid #cbd5e1; background: white; }
+        table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+        th { background: #e9f0f5; padding: 0.8rem; text-align: left; }
+        td { padding: 0.6rem; border-bottom: 1px solid #e9edf2; font-family: monospace; }
+        .alert { background: #fffbeb; border-left: 5px solid #f59e0b; padding: 0.8rem 1rem; margin: 1rem 0; border-radius: 1rem; }
+        .success { background: #e0f2e9; border-left-color: #2b6e4e; }
+        .info-badge { background: #eef3fa; padding: 0.2rem 1rem; border-radius: 40px; font-size: 0.75rem; }
+        footer { text-align: center; margin-top: 2rem; font-size: 0.75rem; color: #5f7f9a; }
+    </style>
+</head>
+<body>
+<div class="card">
+    <h1>📦 POS CSV → Full Sales Format</h1>
+    <div class="sub">Converts your CSV to the exact schema shown (TX‑N38xxx, ISO timestamp, JSON items, boolean flags)</div>
+
+    <div class="file-zone" id="dropZone">
+        📂 Drag & drop or click to upload your POS CSV<br>
+        <small style="color:#64748b;">Expects columns: Date, Receipt number, Description (JSON array), Net sales, Payment type, Store, Cashier name, Discounts ...</small>
+        <input type="file" id="fileInput" accept=".csv" style="display: none;">
+    </div>
+
+    <div class="btn-group">
+        <button class="btn btn-primary" id="downloadBtn" disabled>⬇️ Download converted CSV (target format)</button>
+        <button class="btn btn-secondary" id="resetBtn">⟳ Reset</button>
+    </div>
+
+    <div id="statusMsg"></div>
+    <div id="warningArea" class="alert" style="display: none;"></div>
+
+    <div id="previewSection">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+            <strong>🔍 Preview (first 5 converted rows)</strong>
+            <span id="rowCountBadge" class="info-badge">— rows</span>
+        </div>
+        <div class="preview-wrapper" id="previewContainer">
+            <div style="padding: 2rem; text-align: center; color: #6d8eaa;">No file loaded.</div>
+        </div>
+    </div>
+</div>
+<footer>
+    🧾 <strong>Mapping rules:</strong> Receipt number → transaction_id &nbsp;|&nbsp; Date → ISO timestamp &nbsp;|&nbsp; Description (JSON) → items<br>
+    Net sales → total &nbsp;|&nbsp; Payment type → payment_method &nbsp;|&nbsp; Store → store &nbsp;|&nbsp; Cashier name → sales_person_name & sales_person_id<br>
+    Discounts → discount &nbsp;|&nbsp; settled = TRUE, refunded = FALSE &nbsp;|&nbsp; All other fields blank/0.
+</footer>
+
+<script>
+    // ---------- Target column order (exactly as in your sample) ----------
+    const TARGET_COLUMNS = [
+        "transaction_id", "timestamp", "items", "total", "payment_method", "cash_received",
+        "store", "employee_id", "settled", "refunded", "refund_of", "original_payment_method",
+        "customer_id", "points_awarded", "discount", "buy2_free1_discount", "buy3_free1_discount",
+        "custom_discount", "refunded_by", "staff_discount", "sales_person_name", "sales_person_id"
+    ];
+
+    // Expected source columns (case‑insensitive fallback)
+    const EXPECTED_SOURCE = [
+        "Date", "Receipt number", "Description", "Net sales", "Payment type",
+        "Store", "Cashier name", "Discounts", "Dining option"   // dining option optional
+    ];
+
+    let convertedData = [];     // array of objects (target format)
+    let headerMapping = {};     // expected -> actual column name
+
+    // Helper: show warning/error messages
+    function showMessage(msg, isError = false) {
+        const warnDiv = document.getElementById("warningArea");
+        warnDiv.style.display = "block";
+        warnDiv.innerHTML = msg;
+        warnDiv.className = "alert";
+        if (!isError) warnDiv.classList.add("success");
+        setTimeout(() => { if (warnDiv.innerHTML === msg) warnDiv.style.display = "none"; }, 4000);
+    }
+
+    // Convert a date string from source to ISO string (with timezone = UTC to match sample)
+    function toISOTimestamp(dateValue) {
+        if (!dateValue) return "";
+        let d = new Date(dateValue);
+        if (isNaN(d.getTime())) {
+            // try parse manually if needed
+            const parts = String(dateValue).match(/(\d{4})-(\d{2})-(\d{2})(?:\s+(\d{2}):(\d{2}):(\d{2}))?/);
+            if (parts) {
+                const [, year, month, day, hour = 0, minute = 0, second = 0] = parts;
+                d = new Date(Date.UTC(year, month-1, day, hour, minute, second));
+            } else {
+                return String(dateValue);
+            }
+        }
+        // output as ISO string with milliseconds zero-padded (like sample)
+        return d.toISOString();
+    }
+
+    // Build mapping from actual CSV headers to expected ones (case‑insensitive)
+    function buildMapping(actualHeaders) {
+        const mapping = {};
+        const lowerActual = actualHeaders.map(h => h.trim().toLowerCase());
+        EXPECTED_SOURCE.forEach(exp => {
+            const lowerExp = exp.toLowerCase();
+            const idx = lowerActual.findIndex(act => act === lowerExp);
+            if (idx !== -1) mapping[exp] = actualHeaders[idx];
+            else mapping[exp] = null;
+        });
+        return mapping;
+    }
+
+    // Get a value from the row using the expected column name
+    function getVal(row, expectedCol, mapping) {
+        const actual = mapping[expectedCol];
+        if (!actual) return "";
+        const val = row[actual];
+        return (val !== undefined && val !== null) ? String(val) : "";
+    }
+
+    // Transform one row of source CSV into target object
+    function transformRow(row, mapping) {
+        const receipt = getVal(row, "Receipt number", mapping);
+        const dateRaw = getVal(row, "Date", mapping);
+        const description = getVal(row, "Description", mapping);   // should be JSON string
+        const netSales = getVal(row, "Net sales", mapping);
+        const payment = getVal(row, "Payment type", mapping);
+        const store = getVal(row, "Store", mapping);
+        const cashierName = getVal(row, "Cashier name", mapping);
+        const discounts = getVal(row, "Discounts", mapping);
+        const diningOpt = getVal(row, "Dining option", mapping);   // fallback for employee_id
+
+        // Decide employee_id: try to use Dining option, else cashier name, else blank
+        let employeeId = diningOpt || cashierName || "";
+
+        // Build target object with all required fields
+        return {
+            transaction_id: receipt,
+            timestamp: toISOTimestamp(dateRaw),
+            items: description,                 // keep the JSON string as-is
+            total: netSales,
+            payment_method: payment,
+            cash_received: "",
+            store: store,
+            employee_id: employeeId,
+            settled: "TRUE",                    // hardcoded to match your sample
+            refunded: "FALSE",
+            refund_of: "",
+            original_payment_method: "",
+            customer_id: "",
+            points_awarded: "",
+            discount: discounts,
+            buy2_free1_discount: "0",
+            buy3_free1_discount: "0",
+            custom_discount: "0",
+            refunded_by: "",
+            staff_discount: "0",
+            sales_person_name: cashierName,
+            sales_person_id: employeeId
+        };
+    }
+
+    // Process all rows
+    function convertAllRows(parsedRows, mapping) {
+        const result = [];
+        for (const row of parsedRows) {
+            if (!row || Object.keys(row).length === 0) continue;
+            // skip rows that have no receipt number (optional)
+            const receipt = getVal(row, "Receipt number", mapping);
+            if (!receipt) continue;
+            result.push(transformRow(row, mapping));
+        }
+        return result;
+    }
+
+    // Render preview table (limited columns for readability)
+    function renderPreview(dataArray) {
+        const container = document.getElementById("previewContainer");
+        const badge = document.getElementById("rowCountBadge");
+        if (!dataArray.length) {
+            container.innerHTML = `<div style="padding:2rem; text-align:center;">No converted data to preview.</div>`;
+            badge.innerText = "0 rows";
+            return;
+        }
+        badge.innerText = `${dataArray.length} rows`;
+        const previewRows = dataArray.slice(0, 5);
+        const showCols = ["transaction_id", "timestamp", "items", "total", "payment_method", "store", "discount", "sales_person_name"];
+        let html = `<table><thead><tr>${showCols.map(c => `<th>${c}</th>`).join('')}</tr></thead><tbody>`;
+        for (const row of previewRows) {
+            html += `<tr>`;
+            for (const col of showCols) {
+                let val = row[col] !== undefined ? String(row[col]) : "";
+                if (val.length > 70) val = val.substring(0, 67) + "...";
+                html += `<td title="${escapeHtml(String(row[col] || ''))}">${escapeHtml(val)}</td>`;
+            }
+            html += `</tr>`;
+        }
+        html += `</tbody></table><div style="padding:0.5rem; background:#f8fafc; font-size:0.7rem;">Showing first 5 of ${dataArray.length} rows.</div>`;
+        container.innerHTML = html;
+    }
+
+    function escapeHtml(str) {
+        if (!str) return "";
+        return str.replace(/[&<>]/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[m]));
+    }
+
+    // Download CSV
+    function downloadCSV(dataArray) {
+        if (!dataArray.length) {
+            showMessage("No data to export.", true);
+            return;
+        }
+        const rows = [TARGET_COLUMNS.join(",")];
+        for (const row of dataArray) {
+            const rowValues = TARGET_COLUMNS.map(col => {
+                let val = row[col] !== undefined && row[col] !== null ? row[col] : "";
+                // escape for CSV
+                if (typeof val === "string" && (val.includes(",") || val.includes('"') || val.includes("\n"))) {
+                    val = '"' + val.replace(/"/g, '""') + '"';
+                }
+                return val;
+            });
+            rows.push(rowValues.join(","));
+        }
+        const blob = new Blob(["\uFEFF" + rows.join("\n")], { type: "text/csv;charset=utf-8;" });
+        const link = document.createElement("a");
+        const url = URL.createObjectURL(blob);
+        link.href = url;
+        link.download = "sales_target_format.csv";
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        showMessage("✅ Download complete! File: sales_target_format.csv");
+    }
+
+    // Reset UI
+    function resetUI() {
+        convertedData = [];
+        headerMapping = {};
+        document.getElementById("downloadBtn").disabled = true;
+        document.getElementById("previewContainer").innerHTML = `<div style="padding:2rem; text-align:center;">No file loaded.</div>`;
+        document.getElementById("rowCountBadge").innerText = "— rows";
+        document.getElementById("statusMsg").innerHTML = "";
+        document.getElementById("fileInput").value = "";
+        showMessage("Reset done. Ready for new file.");
+    }
+
+    // Main file handler
+    function handleFile(file) {
+        resetUI();
+        Papa.parse(file, {
+            header: true,
+            skipEmptyLines: true,
+            complete: (results) => {
+                if (results.errors.length) {
+                    console.warn(results.errors);
+                    showMessage(`Parsing warnings: ${results.errors.length} issues.`, true);
+                }
+                const data = results.data;
+                if (!data || data.length === 0) {
+                    showMessage("CSV has no data rows.", true);
+                    return;
+                }
+                const actualHeaders = results.meta.fields;
+                if (!actualHeaders || actualHeaders.length === 0) {
+                    showMessage("Invalid CSV: no headers.", true);
+                    return;
+                }
+                const mapping = buildMapping(actualHeaders);
+                headerMapping = mapping;
+
+                // Check essential columns
+                const missing = [];
+                if (!mapping["Receipt number"]) missing.push("Receipt number");
+                if (!mapping["Description"]) missing.push("Description (JSON)");
+                if (!mapping["Net sales"]) missing.push("Net sales");
+                if (!mapping["Date"]) missing.push("Date");
+                if (missing.length) {
+                    showMessage(`⚠️ Missing columns: ${missing.join(", ")}. Some fields will be empty.`, true);
+                } else {
+                    showMessage("✅ Mapping successful. Converting...");
+                }
+
+                const transformed = convertAllRows(data, mapping);
+                if (transformed.length === 0) {
+                    showMessage("No valid rows after transformation (missing receipt numbers?).", true);
+                    return;
+                }
+                convertedData = transformed;
+                document.getElementById("downloadBtn").disabled = false;
+                renderPreview(convertedData);
+                document.getElementById("statusMsg").innerHTML = `<div class="info-badge">✅ ${transformed.length} rows converted. Ready for download.</div>`;
+            },
+            error: (err) => {
+                console.error(err);
+                showMessage("Error parsing CSV: " + (err.message || "unknown"), true);
+            }
+        });
+    }
+
+    // Event listeners
+    const dropZone = document.getElementById("dropZone");
+    const fileInput = document.getElementById("fileInput");
+    const downloadBtn = document.getElementById("downloadBtn");
+    const resetBtn = document.getElementById("resetBtn");
+
+    dropZone.addEventListener("click", () => fileInput.click());
+    dropZone.addEventListener("dragover", (e) => {
+        e.preventDefault();
+        dropZone.style.borderColor = "#2b6e4e";
+        dropZone.style.backgroundColor = "#f0f9f4";
+    });
+    dropZone.addEventListener("dragleave", () => {
+        dropZone.style.borderColor = "#94a3b8";
+        dropZone.style.backgroundColor = "#fefcfb";
+    });
+    dropZone.addEventListener("drop", (e) => {
+        e.preventDefault();
+        dropZone.style.borderColor = "#94a3b8";
+        dropZone.style.backgroundColor = "#fefcfb";
+        const files = e.dataTransfer.files;
+        if (files.length && files[0].name.endsWith(".csv")) {
+            handleFile(files[0]);
+            fileInput.files = files;
+        } else {
+            showMessage("Please drop a valid .csv file.", true);
+        }
+    });
+
+    fileInput.addEventListener("change", (e) => {
+        if (e.target.files.length) handleFile(e.target.files[0]);
+    });
+
+    downloadBtn.addEventListener("click", () => {
+        if (!convertedData.length) {
+            showMessage("No converted data. Upload a CSV first.", true);
+            return;
+        }
+        downloadCSV(convertedData);
+    });
+
+    resetBtn.addEventListener("click", resetUI);
+</script>
+</body>
+</html>
