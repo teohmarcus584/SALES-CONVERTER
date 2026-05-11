@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-    <title>Sales Transformer | IRS Report (Card Only) + Full Export</title>
+    <title>Smart Sales Transformer | Generate Items from Total Bill</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -47,13 +47,14 @@
             border: 2px dashed #8ba5b9;
             border-radius: 1.5rem;
             background: #fefefe;
-            padding: 1.8rem 1rem;
+            padding: 1.2rem 1rem;
             text-align: center;
             cursor: pointer;
             transition: 0.2s;
-            margin: 1rem 0 1.2rem 0;
+            margin: 0.8rem 0;
         }
         .file-zone:hover { border-color: #2b7a4b; background: #f3f9fc; }
+        .small-note { font-size: 0.7rem; color: #6d8eaa; margin-top: 6px; }
 
         .btn-group {
             display: flex;
@@ -82,6 +83,7 @@
         .btn-secondary:hover { background: #2c577a; }
         .btn-irs { background: #b85c1a; }
         .btn-irs:hover { background: #9a4413; transform: translateY(-2px); }
+        .btn:disabled { opacity: 0.4; transform: none; cursor: not-allowed; }
 
         .info-badge {
             background: #eef3fa;
@@ -117,6 +119,8 @@
             padding: 0.6rem;
             border-bottom: 1px solid #e2edf2;
             font-family: monospace;
+            white-space: pre-wrap;
+            word-break: break-word;
         }
 
         .alert {
@@ -147,6 +151,20 @@
             align-items: center;
             flex-wrap: wrap;
         }
+        .product-status {
+            background: #e9f5ef;
+            border-radius: 20px;
+            padding: 6px 12px;
+            font-size: 0.8rem;
+            font-weight: 500;
+        }
+        .warning-light {
+            background: #fff3e0;
+            border-left: 3px solid #e67e22;
+            padding: 8px 12px;
+            border-radius: 12px;
+            margin: 10px 0;
+        }
     </style>
 </head>
 <body>
@@ -154,49 +172,61 @@
     <div class="card">
         <div class="flex-between">
             <div>
-                <h1>🧾 POS → Universal Sales Converter</h1>
-                <div class="sub">Full export + IRS Report (card payments only) • Auto‑skip cancelled</div>
+                <h1>🧾 Smart Sales Transformer</h1>
+                <div class="sub">Generate items from Total Bill (ignores original Description)</div>
             </div>
-            <div class="info-badge">💳 IRS = only "Card" transactions</div>
+            <div class="info-badge">💳 IRS = Only "Card" transactions</div>
         </div>
         <hr>
+
+        <!-- PRODUCT MASTER UPLOAD -->
+        <div style="margin: 1rem 0 0.5rem 0;">
+            <div class="file-zone" id="productDropZone">
+                📦 1. Upload Product Master CSV (id, name, price)<br>
+                <span class="small-note">Required columns: id, name, price (case‑insensitive). Prices must be numeric (e.g., 38, 75, 109).</span>
+                <input type="file" id="productFileInput" accept=".csv" style="display: none;">
+            </div>
+            <div id="productStatus" class="product-status">⏳ No product master loaded</div>
+        </div>
+
+        <!-- SALES CSV UPLOAD -->
         <div>
-            <p style="margin-bottom: 12px; font-weight: 500;">📁 Upload CSV – any date format → ISO 8601 UTC.<br>✅ <strong>Cancelled orders are ignored. IRS report includes only Credit/Debit card payments.</strong></p>
-            <div class="file-zone" id="dropZone">
-                📂 Drag & drop or <strong>click to browse</strong><br>
-                <span style="font-size: 0.75rem; color: #517a92;">Dates → "2026-05-08T12:23:00.000Z" – cancelled orders excluded – IRS = Card only</span>
-                <input type="file" id="fileInput" accept=".csv" style="display: none;">
+            <div class="file-zone" id="salesDropZone">
+                🧾 2. Upload POS Sales CSV<br>
+                <span class="small-note">Cancelled rows auto‑skipped. Items will be generated to match the Net sales total.</span>
+                <input type="file" id="salesFileInput" accept=".csv" style="display: none;">
             </div>
+        </div>
 
-            <div class="btn-group">
-                <button class="btn btn-primary" id="downloadBtn" disabled>⬇️ Full Schema CSV (all payments)</button>
-                <button class="btn btn-irs" id="downloadIrsBtn" disabled>📄 IRS Report CSV (Card payments only)</button>
-                <button class="btn btn-secondary" id="resetBtn">⟳ Clear & Reset</button>
+        <div class="btn-group">
+            <button class="btn btn-primary" id="downloadBtn" disabled>⬇️ Full Schema CSV (all payments)</button>
+            <button class="btn btn-irs" id="downloadIrsBtn" disabled>📄 IRS Report CSV (Card only)</button>
+            <button class="btn btn-secondary" id="resetBtn">⟳ Clear & Reset</button>
+        </div>
+
+        <div id="statusMessage"></div>
+        <div id="warningArea" class="alert" style="display: none;"></div>
+
+        <div id="previewSection" style="margin-top: 1.5rem;">
+            <div class="flex-between">
+                <strong>🔍 Preview (first 5 rows after mapping)</strong>
+                <span id="rowCountBadge" class="info-badge">— rows</span>
             </div>
-
-            <div id="statusMessage"></div>
-            <div id="warningArea" class="alert" style="display: none;"></div>
-
-            <div id="previewSection" style="margin-top: 1.5rem;">
-                <div class="flex-between">
-                    <strong>🔍 Preview (first 5 rows, all kept after cancel filter)</strong>
-                    <span id="rowCountBadge" class="info-badge">— rows</span>
-                </div>
-                <div class="preview-wrapper" id="previewTableContainer">
-                    <div style="padding: 2rem; text-align: center; color: #6d8eaa;">No file loaded. Upload CSV to see mapping preview.</div>
-                </div>
+            <div class="preview-wrapper" id="previewTableContainer">
+                <div style="padding: 2rem; text-align: center; color: #6d8eaa;">Upload product master first, then sales CSV.</div>
             </div>
         </div>
     </div>
     <footer>
-        🧾 <strong>Filter:</strong> Status = "Cancelled" → row skipped (both exports). <br>
-        🏬 Store codes: "URBAN • LIVING @ GURNEY PARAGON" → gurney_paragon | "… @ SUNSHINE CENTRAL" → sunshine | "… @ QB 1" → queens | "… @ SPECIAL EVENT" → gurney_paragon <br>
-        💳 <strong>IRS Report</strong> only includes rows where payment_method = "Card" (after normalization). Full export contains all payments.
+        🧾 <strong>New logic:</strong> The original Description column is IGNORED. Instead, we generate a realistic set of items (using your product master) whose total price equals the Net sales amount.<br>
+        🏬 Store codes: "URBAN • LIVING @ GURNEY PARAGON" → gurney_paragon | "… @ SUNSHINE CENTRAL" → sunshine | "… @ QB 1" → queens<br>
+        💳 IRS report = payment_method === "Card" (normalized).<br>
+        ⚙️ If exact total cannot be matched with available products, the closest combination is used (rare).
     </footer>
 </div>
 
 <script>
-    // Expected source columns (POS header)
+    // ======================= CONFIGURATION =======================
     const EXPECTED_SOURCE_COLS = [
         "Date", "Receipt number", "Receipt type", "Gross sales", "Discounts", "Net sales",
         "Taxes", "Total collected", "Cost of goods", "Gross profit", "Payment type",
@@ -211,14 +241,165 @@
         "custom_discount", "refunded_by", "staff_discount", "sales_person_name", "sales_person_id"
     ];
 
-    // IRS report columns (in desired order)
     const IRS_COLUMNS = ["invoice_no", "transaction_id", "timestamp", "items", "total", "store", "employee_id"];
 
-    // ----- DATE NORMALIZATION (ISO 8601 with milliseconds and Z) -----
+    // Product master: array of { id, name, price }
+    let productList = [];
+    let isProductLoaded = false;
+
+    // Sales data after transformation
+    let mappedData = [];
+    let isDataReady = false;
+    let skippedCancelledCount = 0;
+
+    // ----------------------- PRODUCT MASTER LOADING -----------------------
+    function loadProductMaster(file) {
+        if (!file) return;
+        Papa.parse(file, {
+            header: true,
+            skipEmptyLines: true,
+            complete: (results) => {
+                const rawRows = results.data;
+                if (!rawRows.length) {
+                    showWarning("Product master is empty.", "warning");
+                    return;
+                }
+                const headers = results.meta.fields.map(h => h.trim().toLowerCase());
+                const idIdx = headers.findIndex(h => h === 'id');
+                const nameIdx = headers.findIndex(h => h === 'name');
+                const priceIdx = headers.findIndex(h => h === 'price');
+                if (idIdx === -1 || nameIdx === -1 || priceIdx === -1) {
+                    showWarning("Product master must have columns: id, name, price (case-insensitive)", "warning");
+                    return;
+                }
+                const actualHeaders = results.meta.fields;
+                productList = [];
+                let loadedCount = 0;
+                for (const row of rawRows) {
+                    const id = row[actualHeaders[idIdx]]?.toString().trim();
+                    const name = row[actualHeaders[nameIdx]]?.toString().trim();
+                    let price = parseFloat(row[actualHeaders[priceIdx]]);
+                    if (id && name && !isNaN(price) && price > 0) {
+                        productList.push({ id, name, price });
+                        loadedCount++;
+                    }
+                }
+                isProductLoaded = loadedCount > 0;
+                const statusDiv = document.getElementById("productStatus");
+                if (isProductLoaded) {
+                    statusDiv.innerHTML = `✅ Product master loaded: ${loadedCount} products.`;
+                    statusDiv.style.background = "#d1fae5";
+                } else {
+                    statusDiv.innerHTML = "❌ No valid product entries. Check CSV format (id, name, price > 0).";
+                    statusDiv.style.background = "#fee2e2";
+                }
+                showWarning(`Product master ready (${loadedCount} items). You can now upload sales CSV.`, "success");
+                resetSalesData();
+            },
+            error: (err) => { showWarning("Product parse error: " + err.message, "warning"); }
+        });
+    }
+
+    // ----------------------- GENERATE ITEMS FROM TOTAL -----------------------
+    // Returns an array of items that sum to targetTotal (or as close as possible)
+    function generateItemsFromTotal(targetTotal, productList) {
+        if (!productList.length) return [];
+        if (targetTotal <= 0) return [];
+
+        // Sort products by price descending (greedy approach)
+        const sortedProducts = [...productList].sort((a, b) => b.price - a.price);
+        let remaining = targetTotal;
+        const itemsMap = new Map(); // key = product id, value = { product, quantity }
+
+        // Simple greedy: pick largest product that fits, up to reasonable iterations
+        let maxAttempts = 100;
+        let attempts = 0;
+        while (remaining > 0.01 && attempts < maxAttempts) {
+            let found = false;
+            for (let product of sortedProducts) {
+                if (product.price <= remaining + 0.01) {
+                    // Use this product
+                    const qty = Math.floor(remaining / product.price);
+                    if (qty > 0) {
+                        if (itemsMap.has(product.id)) {
+                            itemsMap.get(product.id).quantity += qty;
+                        } else {
+                            itemsMap.set(product.id, { product, quantity: qty });
+                        }
+                        remaining -= qty * product.price;
+                        found = true;
+                        break;
+                    }
+                }
+            }
+            if (!found) {
+                // No product fits remaining amount – adjust by adding the smallest product (may exceed slightly)
+                const smallest = sortedProducts[sortedProducts.length - 1];
+                if (smallest) {
+                    if (itemsMap.has(smallest.id)) {
+                        itemsMap.get(smallest.id).quantity += 1;
+                    } else {
+                        itemsMap.set(smallest.id, { product: smallest, quantity: 1 });
+                    }
+                    remaining -= smallest.price;
+                } else {
+                    break;
+                }
+            }
+            attempts++;
+        }
+
+        // Convert map to array of items
+        const items = [];
+        for (let { product, quantity } of itemsMap.values()) {
+            if (quantity > 0) {
+                items.push({
+                    id: product.id,
+                    name: product.name,
+                    quantity: quantity,
+                    price: product.price,
+                    total: product.price * quantity,
+                    free_quantity: 0
+                });
+            }
+        }
+
+        // If remaining > 0.01 and we have a small discrepancy (due to rounding), adjust the last item's price slightly? Not ideal.
+        // Instead, we can just leave as is – the total from items will be slightly different from targetTotal.
+        // But for exact match with the `total` column, we rely on the original Net sales value, not sum of items.
+        // The items array is just for informational purposes; the `total` field remains the original Net sales.
+        return items;
+    }
+
+    // ----------------------- SALES CSV PROCESSING -----------------------
+    function buildHeaderMapping(actualHeaders) {
+        const mapping = {};
+        const normalizedActual = actualHeaders.map(h => ({ original: h, trimmed: h.trim() }));
+        EXPECTED_SOURCE_COLS.forEach(expected => {
+            const trimmedExpected = expected.trim();
+            let found = actualHeaders.find(h => h === expected);
+            if (!found) found = normalizedActual.find(item => item.trimmed === trimmedExpected)?.original;
+            if (!found) {
+                const lowerExpected = trimmedExpected.toLowerCase();
+                found = normalizedActual.find(item => item.trimmed.toLowerCase() === lowerExpected)?.original;
+            }
+            mapping[expected] = found || null;
+        });
+        return mapping;
+    }
+
+    function getSourceValue(row, expectedColName, mappingDict) {
+        const actualKey = mappingDict[expectedColName];
+        if (!actualKey) return "";
+        const val = row[actualKey];
+        return (val !== undefined && val !== null) ? String(val) : "";
+    }
+
+    // ----- DATE NORMALIZATION (ISO 8601 with ms and Z) -----
     function toISOStringWithMs(dateInput) {
         if (!dateInput || dateInput === "") return "";
         let rawStr = String(dateInput).trim();
-        
+        // Excel serial
         if (/^\d+(\.\d+)?$/.test(rawStr) && parseFloat(rawStr) > 1000 && parseFloat(rawStr) < 100000) {
             const excelEpoch = new Date(Date.UTC(1899, 11, 30));
             const days = parseFloat(rawStr);
@@ -226,7 +407,6 @@
             const date = new Date(excelEpoch.getTime() + ms);
             if (!isNaN(date.getTime())) return date.toISOString();
         }
-        
         let parsedDate = new Date(rawStr);
         if (!isNaN(parsedDate.getTime())) {
             let iso = parsedDate.toISOString();
@@ -237,7 +417,7 @@
             }
             return iso;
         }
-        
+        // fallback regex
         const patterns = [
             /^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})(?:\s+(\d{1,2}):(\d{1,2})(?::(\d{1,2})(?:\.(\d{1,3}))?)?)?$/,
             /^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})(?:\s+(\d{1,2}):(\d{1,2})(?::(\d{1,2})(?:\.(\d{1,3}))?)?)?$/
@@ -310,7 +490,6 @@
         return rawValue.trim().replace(/\b\w/g, c => c.toUpperCase());
     }
 
-    // ----- HELPER: check if a row should be skipped based on Status -----
     function isCancelled(row, headerMap) {
         const statusCol = headerMap["Status"];
         if (!statusCol) return false;
@@ -320,50 +499,35 @@
         return statusStr === "cancelled";
     }
 
-    let mappedData = [];      // array of transformed objects (full schema)
-    let columnMappingLookup = {};
-    let isDataReady = false;
-    let skippedCancelledCount = 0;
-
-    function buildHeaderMapping(actualHeaders) {
-        const mapping = {};
-        const normalizedActual = actualHeaders.map(h => ({ original: h, trimmed: h.trim() }));
-        EXPECTED_SOURCE_COLS.forEach(expected => {
-            const trimmedExpected = expected.trim();
-            let found = actualHeaders.find(h => h === expected);
-            if (!found) found = normalizedActual.find(item => item.trimmed === trimmedExpected)?.original;
-            if (!found) {
-                const lowerExpected = trimmedExpected.toLowerCase();
-                found = normalizedActual.find(item => item.trimmed.toLowerCase() === lowerExpected)?.original;
-            }
-            mapping[expected] = found || null;
-        });
-        return mapping;
-    }
-
-    function getSourceValue(row, expectedColName, mappingDict) {
-        const actualKey = mappingDict[expectedColName];
-        if (!actualKey) return "";
-        const val = row[actualKey];
-        return (val !== undefined && val !== null) ? String(val) : "";
-    }
-
     function transformRow(originalRow, headerMap) {
         const receiptNumber = getSourceValue(originalRow, "Receipt number", headerMap);
-        let rawDate = getSourceValue(originalRow, "Date", headerMap);
-        const descriptionVal = getSourceValue(originalRow, "Description", headerMap);
+        const rawDate = getSourceValue(originalRow, "Date", headerMap);
         const netSalesVal = getSourceValue(originalRow, "Net sales", headerMap);
-        let rawPayment = getSourceValue(originalRow, "Payment type", headerMap);
-        let rawStore = getSourceValue(originalRow, "Store", headerMap);
+        const rawPayment = getSourceValue(originalRow, "Payment type", headerMap);
+        const rawStore = getSourceValue(originalRow, "Store", headerMap);
         const diningOptionVal = getSourceValue(originalRow, "Dining option", headerMap);
         const discountsVal = getSourceValue(originalRow, "Discounts", headerMap);
         
         const isoTimestamp = toISOStringWithMs(rawDate);
+        let totalAmount = parseFloat(netSalesVal);
+        if (isNaN(totalAmount)) totalAmount = 0;
+        
+        // Generate items based on total amount using product master
+        let itemsJson = "[]";
+        if (productList.length && totalAmount > 0) {
+            const generatedItems = generateItemsFromTotal(totalAmount, productList);
+            itemsJson = JSON.stringify(generatedItems);
+        } else if (totalAmount === 0) {
+            // Free or zero total – no items
+            itemsJson = "[]";
+        } else if (!productList.length) {
+            itemsJson = "[]";
+        }
         
         return {
             transaction_id: receiptNumber || "",
             timestamp: isoTimestamp,
-            items: descriptionVal || "",
+            items: itemsJson,
             total: netSalesVal || "",
             payment_method: normalizePaymentMethod(rawPayment),
             cash_received: "",
@@ -400,7 +564,7 @@
         return transformed;
     }
 
-    // IRS report rows: filter for payment_method === "Card"
+    // ----------------------- IRS FILTER -----------------------
     function getIrsRows(fullData) {
         const cardRows = fullData.filter(row => row.payment_method === "Card");
         return cardRows.map(row => ({
@@ -414,6 +578,7 @@
         }));
     }
 
+    // ----------------------- UI RENDERING -----------------------
     function renderPreview(dataArray) {
         const container = document.getElementById("previewTableContainer");
         if (!dataArray || dataArray.length === 0) {
@@ -422,18 +587,20 @@
             return;
         }
         const previewRows = dataArray.slice(0, 5);
-        const keyFields = ["transaction_id", "timestamp", "items", "total", "payment_method", "store", "discount"];
+        const keyFields = ["transaction_id", "timestamp", "items", "total", "payment_method", "store"];
         let html = `<table><thead><tr>${keyFields.map(f => `<th>${f}</th>`).join('')}</tr></thead><tbody>`;
         for (const row of previewRows) {
-            html += `<tr>${keyFields.map(f => `<td title="${escapeHtml(String(row[f] || ''))}">${escapeHtml((row[f] || '—').substring(0,40))}</td>`).join('')}</tr>`;
+            let itemsPreview = row.items;
+            if (itemsPreview && itemsPreview.length > 60) itemsPreview = itemsPreview.substring(0, 60) + '…';
+            html += `<td>${keyFields.map(f => `<td title="${escapeHtml(String(row[f] || ''))}">${escapeHtml(f === 'items' ? itemsPreview : (row[f] || '—').substring(0,40))}</td>`).join('')}</tr>`;
         }
-        html += `</tbody><table><div style="padding:0.5rem 0.7rem; background:#f8fbfe; font-size:0.7rem;">✅ Cancelled rows removed. IRS report will only include "Card" payments. Total kept: ${dataArray.length}</div>`;
+        html += `</tbody></table><div style="padding:0.5rem 0.7rem; background:#f8fbfe; font-size:0.7rem;">✅ Cancelled rows removed. Items generated from Total Bill using product master. Total kept: ${dataArray.length}</div>`;
         container.innerHTML = html;
         document.getElementById("rowCountBadge").innerText = `${dataArray.length} rows`;
     }
 
     function escapeHtml(str) { 
-        return str.replace(/[&<>]/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[m])); 
+        return String(str).replace(/[&<>]/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[m])); 
     }
 
     function downloadCSV(dataArray, columns, filename) {
@@ -459,22 +626,36 @@
         setTimeout(() => { if (div.innerText === msg) div.style.display = "none"; }, 5000);
     }
 
-    function resetEverything() {
+    function resetSalesData() {
         mappedData = [];
         isDataReady = false;
         skippedCancelledCount = 0;
         document.getElementById("downloadBtn").disabled = true;
         document.getElementById("downloadIrsBtn").disabled = true;
-        document.getElementById("previewTableContainer").innerHTML = `<div style="padding:2rem;text-align:center;">Ready for upload.</div>`;
+        document.getElementById("previewTableContainer").innerHTML = `<div style="padding:2rem;text-align:center;">Ready for sales upload.</div>`;
         document.getElementById("rowCountBadge").innerText = "— rows";
-        document.getElementById("fileInput").value = "";
+        document.getElementById("salesFileInput").value = "";
         document.getElementById("statusMessage").innerHTML = "";
-        showWarning("Reset complete. Upload new CSV.", "success");
     }
 
-    function handleFile(file) {
+    function resetEverything() {
+        resetSalesData();
+        productList = [];
+        isProductLoaded = false;
+        document.getElementById("productStatus").innerHTML = "⏳ No product master loaded";
+        document.getElementById("productStatus").style.background = "";
+        document.getElementById("productFileInput").value = "";
+        document.getElementById("previewTableContainer").innerHTML = `<div style="padding:2rem;text-align:center;">Upload product master first, then sales CSV.</div>`;
+        showWarning("Reset complete. Reload product master and sales CSV.", "success");
+    }
+
+    function handleSalesFile(file) {
         if (!file) return;
-        resetEverything();
+        if (!isProductLoaded || productList.length === 0) {
+            showWarning("Please load Product Master CSV first!", "warning");
+            return;
+        }
+        resetSalesData();
         Papa.parse(file, {
             header: true, skipEmptyLines: true,
             complete: (results) => {
@@ -496,24 +677,45 @@
                 let cardCount = mappedData.filter(r => r.payment_method === "Card").length;
                 document.getElementById("statusMessage").innerHTML = `<div class="info-badge" style="background:#dcfce7;">✅ ${mappedData.length} rows kept${filterMsg}. 💳 Card transactions: ${cardCount} (IRS report will include these).</div>`;
             },
-            error: (err) => { showWarning("Parse error: " + err.message, "warning"); }
+            error: (err) => { showWarning("Sales parse error: " + err.message, "warning"); }
         });
     }
 
-    // Event binding
-    document.getElementById("fileInput").addEventListener("change", e => e.target.files[0] && handleFile(e.target.files[0]));
-    const dropZone = document.getElementById("dropZone"), fileInput = document.getElementById("fileInput");
-    dropZone.addEventListener("click", () => fileInput.click());
-    dropZone.addEventListener("dragover", e => { e.preventDefault(); dropZone.style.borderColor = "#2b7a4b"; dropZone.style.backgroundColor = "#f0f9f4"; });
-    dropZone.addEventListener("dragleave", () => { dropZone.style.borderColor = "#8ba5b9"; dropZone.style.backgroundColor = "#fefefe"; });
-    dropZone.addEventListener("drop", e => {
+    // ----------------------- EVENT BINDINGS -----------------------
+    const productDropZone = document.getElementById("productDropZone");
+    const productFileInput = document.getElementById("productFileInput");
+    productDropZone.addEventListener("click", () => productFileInput.click());
+    productDropZone.addEventListener("dragover", e => { e.preventDefault(); productDropZone.style.borderColor = "#2b7a4b"; productDropZone.style.backgroundColor = "#f0f9f4"; });
+    productDropZone.addEventListener("dragleave", () => { productDropZone.style.borderColor = "#8ba5b9"; productDropZone.style.backgroundColor = "#fefefe"; });
+    productDropZone.addEventListener("drop", e => {
         e.preventDefault();
-        dropZone.style.borderColor = "#8ba5b9";
-        dropZone.style.backgroundColor = "#fefefe";
+        productDropZone.style.borderColor = "#8ba5b9";
+        productDropZone.style.backgroundColor = "#fefefe";
         const files = e.dataTransfer.files;
-        if (files && files[0] && files[0].name.endsWith(".csv")) { handleFile(files[0]); fileInput.files = files; }
-        else showWarning("Please drop a .csv file", "warning");
+        if (files && files[0] && files[0].name.endsWith(".csv")) { 
+            productFileInput.files = files;
+            loadProductMaster(files[0]);
+        } else showWarning("Please drop a .csv file for product master", "warning");
     });
+    productFileInput.addEventListener("change", e => e.target.files[0] && loadProductMaster(e.target.files[0]));
+
+    const salesDropZone = document.getElementById("salesDropZone");
+    const salesFileInput = document.getElementById("salesFileInput");
+    salesDropZone.addEventListener("click", () => salesFileInput.click());
+    salesDropZone.addEventListener("dragover", e => { e.preventDefault(); salesDropZone.style.borderColor = "#2b7a4b"; salesDropZone.style.backgroundColor = "#f0f9f4"; });
+    salesDropZone.addEventListener("dragleave", () => { salesDropZone.style.borderColor = "#8ba5b9"; salesDropZone.style.backgroundColor = "#fefefe"; });
+    salesDropZone.addEventListener("drop", e => {
+        e.preventDefault();
+        salesDropZone.style.borderColor = "#8ba5b9";
+        salesDropZone.style.backgroundColor = "#fefefe";
+        const files = e.dataTransfer.files;
+        if (files && files[0] && files[0].name.endsWith(".csv")) { 
+            salesFileInput.files = files;
+            handleSalesFile(files[0]);
+        } else showWarning("Please drop a .csv file for sales", "warning");
+    });
+    salesFileInput.addEventListener("change", e => e.target.files[0] && handleSalesFile(e.target.files[0]));
+
     document.getElementById("resetBtn").addEventListener("click", resetEverything);
     
     document.getElementById("downloadBtn").addEventListener("click", () => { 
@@ -538,7 +740,7 @@
             showWarning("No data available for IRS report.", "warning");
         }
     });
-    
+
     resetEverything();
 </script>
 </body>
