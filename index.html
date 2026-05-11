@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-    <title>Smart Sales Transformer | Generate Items + Custom Discount</title>
+    <title>Smart Sales Transformer | Fixed – Safe DP, Fallback Greedy</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -214,7 +214,7 @@
         🧾 <strong>Logic:</strong> Original Description is IGNORED. Items are generated from product master using a DP algorithm to find a combination where sum(price*quantity) is the smallest possible value ≥ Net sales. The excess is stored as <code>custom_discount</code>. The final <code>total</code> column remains the original Net sales.<br>
         🏬 Store codes: "URBAN • LIVING @ GURNEY PARAGON" → gurney_paragon | "… @ SUNSHINE CENTRAL" → sunshine | "… @ QB 1" → queens<br>
         💳 IRS report = payment_method === "Card" (normalized).<br>
-        ⚙️ If no combination reaches the target, the largest product is used repeatedly; discount adjusted accordingly.
+        ⚙️ If no DP combination works (e.g., very large total), a greedy fallback ensures safe output.
     </footer>
 </div>
 
@@ -277,7 +277,7 @@
                         loadedCount++;
                     }
                 }
-                // Sort by price for easier DP (ascending)
+                // Sort by price for DP (ascending)
                 productList.sort((a,b) => a.price - b.price);
                 isProductLoaded = loadedCount > 0;
                 const statusDiv = document.getElementById("productStatus");
@@ -295,47 +295,64 @@
         });
     }
 
-    // ----------------------- DP GENERATOR: minimal sum >= target, return { items, customDiscount } -----------------------
+    // ----------------------- SAFE DP + FALLBACK -----------------------
     function generateItemsFromTotal(targetTotal, productList) {
         if (!productList.length) return { items: [], customDiscount: 0 };
         if (targetTotal <= 0) return { items: [], customDiscount: 0 };
+        if (isNaN(targetTotal) || !isFinite(targetTotal)) return { items: [], customDiscount: 0 };
 
-        // Extract unique prices and keep one representative product per price (any)
+        // Extract unique prices and representative product
         const priceToProduct = new Map();
         for (const prod of productList) {
-            if (!priceToProduct.has(prod.price)) {
-                priceToProduct.set(prod.price, prod);
+            if (prod.price > 0 && isFinite(prod.price)) {
+                if (!priceToProduct.has(prod.price)) {
+                    priceToProduct.set(prod.price, prod);
+                }
             }
         }
+        if (priceToProduct.size === 0) return { items: [], customDiscount: 0 };
+
         const uniquePrices = Array.from(priceToProduct.keys()).sort((a,b) => a - b);
         const maxPrice = uniquePrices[uniquePrices.length - 1];
-        // Upper bound: we won't need to go beyond target + maxPrice
-        const maxSum = targetTotal + maxPrice;
+        // Upper bound for DP: targetTotal + maxPrice
+        let maxSum = targetTotal + maxPrice;
+        // Guard against huge or invalid array length
+        if (!isFinite(maxSum) || maxSum > 50000) {
+            // Fallback: greedy (largest product repeated)
+            const largestProduct = productList.reduce((a,b) => a.price > b.price ? a : b);
+            const qty = Math.ceil(targetTotal / largestProduct.price);
+            const items = [{
+                id: largestProduct.id,
+                name: largestProduct.name,
+                quantity: qty,
+                price: largestProduct.price,
+                total: largestProduct.price * qty,
+                free_quantity: 0
+            }];
+            const excess = (largestProduct.price * qty) - targetTotal;
+            return { items, customDiscount: excess };
+        }
+
         // DP array: stores the best combination for each sum (as Map of productId -> quantity)
         const dp = new Array(maxSum + 1).fill(null);
-        dp[0] = new Map(); // sum 0 -> empty map
+        dp[0] = new Map();
 
         let bestSum = null;
         let bestExcess = Infinity;
 
-        // Iterate over sums from low to high
         for (let sum = 0; sum <= maxSum; sum++) {
             if (dp[sum] === null) continue;
-            // For this sum, try adding each unique price
             for (const price of uniquePrices) {
                 const newSum = sum + price;
                 if (newSum > maxSum) continue;
-                // Create a new map copy from current state
                 const newMap = new Map(dp[sum]);
                 const product = priceToProduct.get(price);
                 const prodId = product.id;
                 newMap.set(prodId, (newMap.get(prodId) || 0) + 1);
-                // If this newSum is not yet reached, or the combination has fewer items (we prefer fewer items for readability)
                 if (dp[newSum] === null || mapTotalItems(newMap) < mapTotalItems(dp[newSum])) {
                     dp[newSum] = newMap;
                 }
             }
-            // After processing sum, check if sum >= target and we have a combination
             if (sum >= targetTotal && dp[sum] !== null) {
                 const excess = sum - targetTotal;
                 if (excess < bestExcess) {
@@ -349,15 +366,14 @@
         if (bestSum !== null) {
             finalMap = dp[bestSum];
         } else {
-            // Fallback: use the largest product repeatedly to reach >= target
-            const maxProduct = productList.reduce((a,b) => a.price > b.price ? a : b);
-            const qty = Math.ceil(targetTotal / maxProduct.price);
+            // Fallback greedy
+            const largestProduct = productList.reduce((a,b) => a.price > b.price ? a : b);
+            const qty = Math.ceil(targetTotal / largestProduct.price);
             finalMap = new Map();
-            finalMap.set(maxProduct.id, qty);
-            bestExcess = (qty * maxProduct.price) - targetTotal;
+            finalMap.set(largestProduct.id, qty);
+            bestExcess = (largestProduct.price * qty) - targetTotal;
         }
 
-        // Convert map to items array
         const items = [];
         for (let [prodId, qty] of finalMap.entries()) {
             const product = productList.find(p => p.id === prodId);
@@ -372,7 +388,6 @@
                 });
             }
         }
-        // Sort items by price descending for better display
         items.sort((a,b) => b.price - a.price);
         return { items, customDiscount: bestExcess };
     }
@@ -407,7 +422,6 @@
         return (val !== undefined && val !== null) ? String(val) : "";
     }
 
-    // Date normalization to ISO 8601 with ms and Z
     function toISOStringWithMs(dateInput) {
         if (!dateInput || dateInput === "") return "";
         let rawStr = String(dateInput).trim();
@@ -456,7 +470,6 @@
         return rawStr;
     }
 
-    // Store normalization
     const STORE_NORMALIZATION_MAP = new Map([
         ["URBAN • LIVING @ GURNEY PARAGON", "gurney_paragon"],
         ["URBAN • LIVING @ SUNSHINE CENTRAL", "sunshine"],
@@ -479,7 +492,6 @@
         return trimmed;
     }
 
-    // Payment normalization
     const PAYMENT_NORMALIZATION_MAP = {
         "credit/debit card": "Card",
         "debit card": "Card",
@@ -522,7 +534,6 @@
         let totalAmount = parseFloat(netSalesVal);
         if (isNaN(totalAmount)) totalAmount = 0;
         
-        // Generate items and custom discount
         let itemsJson = "[]";
         let customDiscount = 0;
         if (productList.length && totalAmount > 0) {
