@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-    <title>Smart Sales Transformer | Generate Items from Total Bill</title>
+    <title>Smart Sales Transformer | Generate Items + Custom Discount</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -158,13 +158,6 @@
             font-size: 0.8rem;
             font-weight: 500;
         }
-        .warning-light {
-            background: #fff3e0;
-            border-left: 3px solid #e67e22;
-            padding: 8px 12px;
-            border-radius: 12px;
-            margin: 10px 0;
-        }
     </style>
 </head>
 <body>
@@ -173,7 +166,7 @@
         <div class="flex-between">
             <div>
                 <h1>🧾 Smart Sales Transformer</h1>
-                <div class="sub">Generate items from Total Bill (ignores original Description)</div>
+                <div class="sub">Generate items from product master → custom discount = excess amount</div>
             </div>
             <div class="info-badge">💳 IRS = Only "Card" transactions</div>
         </div>
@@ -183,7 +176,7 @@
         <div style="margin: 1rem 0 0.5rem 0;">
             <div class="file-zone" id="productDropZone">
                 📦 1. Upload Product Master CSV (id, name, price)<br>
-                <span class="small-note">Required columns: id, name, price (case‑insensitive). Prices must be numeric (e.g., 38, 75, 109).</span>
+                <span class="small-note">Required columns: id, name, price (numeric positive). Used to generate items.</span>
                 <input type="file" id="productFileInput" accept=".csv" style="display: none;">
             </div>
             <div id="productStatus" class="product-status">⏳ No product master loaded</div>
@@ -193,7 +186,7 @@
         <div>
             <div class="file-zone" id="salesDropZone">
                 🧾 2. Upload POS Sales CSV<br>
-                <span class="small-note">Cancelled rows auto‑skipped. Items will be generated to match the Net sales total.</span>
+                <span class="small-note">Cancelled rows auto‑skipped. Items generated to reach ≥ total, then custom_discount = difference.</span>
                 <input type="file" id="salesFileInput" accept=".csv" style="display: none;">
             </div>
         </div>
@@ -218,10 +211,10 @@
         </div>
     </div>
     <footer>
-        🧾 <strong>New logic:</strong> The original Description column is IGNORED. Instead, we generate a realistic set of items (using your product master) whose total price equals the Net sales amount.<br>
+        🧾 <strong>Logic:</strong> Original Description is IGNORED. Items are generated from product master using a DP algorithm to find a combination where sum(price*quantity) is the smallest possible value ≥ Net sales. The excess is stored as <code>custom_discount</code>. The final <code>total</code> column remains the original Net sales.<br>
         🏬 Store codes: "URBAN • LIVING @ GURNEY PARAGON" → gurney_paragon | "… @ SUNSHINE CENTRAL" → sunshine | "… @ QB 1" → queens<br>
         💳 IRS report = payment_method === "Card" (normalized).<br>
-        ⚙️ If exact total cannot be matched with available products, the closest combination is used (rare).
+        ⚙️ If no combination reaches the target, the largest product is used repeatedly; discount adjusted accordingly.
     </footer>
 </div>
 
@@ -284,6 +277,8 @@
                         loadedCount++;
                     }
                 }
+                // Sort by price for easier DP (ascending)
+                productList.sort((a,b) => a.price - b.price);
                 isProductLoaded = loadedCount > 0;
                 const statusDiv = document.getElementById("productStatus");
                 if (isProductLoaded) {
@@ -300,75 +295,92 @@
         });
     }
 
-    // ----------------------- GENERATE ITEMS FROM TOTAL -----------------------
-    // Returns an array of items that sum to targetTotal (or as close as possible)
+    // ----------------------- DP GENERATOR: minimal sum >= target, return { items, customDiscount } -----------------------
     function generateItemsFromTotal(targetTotal, productList) {
-        if (!productList.length) return [];
-        if (targetTotal <= 0) return [];
+        if (!productList.length) return { items: [], customDiscount: 0 };
+        if (targetTotal <= 0) return { items: [], customDiscount: 0 };
 
-        // Sort products by price descending (greedy approach)
-        const sortedProducts = [...productList].sort((a, b) => b.price - a.price);
-        let remaining = targetTotal;
-        const itemsMap = new Map(); // key = product id, value = { product, quantity }
+        // Extract unique prices and keep one representative product per price (any)
+        const priceToProduct = new Map();
+        for (const prod of productList) {
+            if (!priceToProduct.has(prod.price)) {
+                priceToProduct.set(prod.price, prod);
+            }
+        }
+        const uniquePrices = Array.from(priceToProduct.keys()).sort((a,b) => a - b);
+        const maxPrice = uniquePrices[uniquePrices.length - 1];
+        // Upper bound: we won't need to go beyond target + maxPrice
+        const maxSum = targetTotal + maxPrice;
+        // DP array: stores the best combination for each sum (as Map of productId -> quantity)
+        const dp = new Array(maxSum + 1).fill(null);
+        dp[0] = new Map(); // sum 0 -> empty map
 
-        // Simple greedy: pick largest product that fits, up to reasonable iterations
-        let maxAttempts = 100;
-        let attempts = 0;
-        while (remaining > 0.01 && attempts < maxAttempts) {
-            let found = false;
-            for (let product of sortedProducts) {
-                if (product.price <= remaining + 0.01) {
-                    // Use this product
-                    const qty = Math.floor(remaining / product.price);
-                    if (qty > 0) {
-                        if (itemsMap.has(product.id)) {
-                            itemsMap.get(product.id).quantity += qty;
-                        } else {
-                            itemsMap.set(product.id, { product, quantity: qty });
-                        }
-                        remaining -= qty * product.price;
-                        found = true;
-                        break;
-                    }
+        let bestSum = null;
+        let bestExcess = Infinity;
+
+        // Iterate over sums from low to high
+        for (let sum = 0; sum <= maxSum; sum++) {
+            if (dp[sum] === null) continue;
+            // For this sum, try adding each unique price
+            for (const price of uniquePrices) {
+                const newSum = sum + price;
+                if (newSum > maxSum) continue;
+                // Create a new map copy from current state
+                const newMap = new Map(dp[sum]);
+                const product = priceToProduct.get(price);
+                const prodId = product.id;
+                newMap.set(prodId, (newMap.get(prodId) || 0) + 1);
+                // If this newSum is not yet reached, or the combination has fewer items (we prefer fewer items for readability)
+                if (dp[newSum] === null || mapTotalItems(newMap) < mapTotalItems(dp[newSum])) {
+                    dp[newSum] = newMap;
                 }
             }
-            if (!found) {
-                // No product fits remaining amount – adjust by adding the smallest product (may exceed slightly)
-                const smallest = sortedProducts[sortedProducts.length - 1];
-                if (smallest) {
-                    if (itemsMap.has(smallest.id)) {
-                        itemsMap.get(smallest.id).quantity += 1;
-                    } else {
-                        itemsMap.set(smallest.id, { product: smallest, quantity: 1 });
-                    }
-                    remaining -= smallest.price;
-                } else {
-                    break;
+            // After processing sum, check if sum >= target and we have a combination
+            if (sum >= targetTotal && dp[sum] !== null) {
+                const excess = sum - targetTotal;
+                if (excess < bestExcess) {
+                    bestExcess = excess;
+                    bestSum = sum;
                 }
             }
-            attempts++;
         }
 
-        // Convert map to array of items
+        let finalMap;
+        if (bestSum !== null) {
+            finalMap = dp[bestSum];
+        } else {
+            // Fallback: use the largest product repeatedly to reach >= target
+            const maxProduct = productList.reduce((a,b) => a.price > b.price ? a : b);
+            const qty = Math.ceil(targetTotal / maxProduct.price);
+            finalMap = new Map();
+            finalMap.set(maxProduct.id, qty);
+            bestExcess = (qty * maxProduct.price) - targetTotal;
+        }
+
+        // Convert map to items array
         const items = [];
-        for (let { product, quantity } of itemsMap.values()) {
-            if (quantity > 0) {
+        for (let [prodId, qty] of finalMap.entries()) {
+            const product = productList.find(p => p.id === prodId);
+            if (product) {
                 items.push({
                     id: product.id,
                     name: product.name,
-                    quantity: quantity,
+                    quantity: qty,
                     price: product.price,
-                    total: product.price * quantity,
+                    total: product.price * qty,
                     free_quantity: 0
                 });
             }
         }
+        // Sort items by price descending for better display
+        items.sort((a,b) => b.price - a.price);
+        return { items, customDiscount: bestExcess };
+    }
 
-        // If remaining > 0.01 and we have a small discrepancy (due to rounding), adjust the last item's price slightly? Not ideal.
-        // Instead, we can just leave as is – the total from items will be slightly different from targetTotal.
-        // But for exact match with the `total` column, we rely on the original Net sales value, not sum of items.
-        // The items array is just for informational purposes; the `total` field remains the original Net sales.
-        return items;
+    function mapTotalItems(map) {
+        let total = 0;
+        for (let v of map.values()) total += v;
+        return total;
     }
 
     // ----------------------- SALES CSV PROCESSING -----------------------
@@ -395,11 +407,10 @@
         return (val !== undefined && val !== null) ? String(val) : "";
     }
 
-    // ----- DATE NORMALIZATION (ISO 8601 with ms and Z) -----
+    // Date normalization to ISO 8601 with ms and Z
     function toISOStringWithMs(dateInput) {
         if (!dateInput || dateInput === "") return "";
         let rawStr = String(dateInput).trim();
-        // Excel serial
         if (/^\d+(\.\d+)?$/.test(rawStr) && parseFloat(rawStr) > 1000 && parseFloat(rawStr) < 100000) {
             const excelEpoch = new Date(Date.UTC(1899, 11, 30));
             const days = parseFloat(rawStr);
@@ -417,7 +428,6 @@
             }
             return iso;
         }
-        // fallback regex
         const patterns = [
             /^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})(?:\s+(\d{1,2}):(\d{1,2})(?::(\d{1,2})(?:\.(\d{1,3}))?)?)?$/,
             /^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})(?:\s+(\d{1,2}):(\d{1,2})(?::(\d{1,2})(?:\.(\d{1,3}))?)?)?$/
@@ -446,7 +456,7 @@
         return rawStr;
     }
 
-    // ----- STORE NORMALIZATION -----
+    // Store normalization
     const STORE_NORMALIZATION_MAP = new Map([
         ["URBAN • LIVING @ GURNEY PARAGON", "gurney_paragon"],
         ["URBAN • LIVING @ SUNSHINE CENTRAL", "sunshine"],
@@ -469,7 +479,7 @@
         return trimmed;
     }
 
-    // ----- PAYMENT NORMALIZATION -----
+    // Payment normalization
     const PAYMENT_NORMALIZATION_MAP = {
         "credit/debit card": "Card",
         "debit card": "Card",
@@ -512,18 +522,18 @@
         let totalAmount = parseFloat(netSalesVal);
         if (isNaN(totalAmount)) totalAmount = 0;
         
-        // Generate items based on total amount using product master
+        // Generate items and custom discount
         let itemsJson = "[]";
+        let customDiscount = 0;
         if (productList.length && totalAmount > 0) {
-            const generatedItems = generateItemsFromTotal(totalAmount, productList);
-            itemsJson = JSON.stringify(generatedItems);
+            const { items, customDiscount: disc } = generateItemsFromTotal(totalAmount, productList);
+            itemsJson = JSON.stringify(items);
+            customDiscount = disc;
         } else if (totalAmount === 0) {
-            // Free or zero total – no items
             itemsJson = "[]";
-        } else if (!productList.length) {
-            itemsJson = "[]";
+            customDiscount = 0;
         }
-        
+
         return {
             transaction_id: receiptNumber || "",
             timestamp: isoTimestamp,
@@ -542,7 +552,7 @@
             discount: discountsVal || "",
             buy2_free1_discount: "",
             buy3_free1_discount: "",
-            custom_discount: "",
+            custom_discount: customDiscount > 0 ? customDiscount.toFixed(2) : "",
             refunded_by: "",
             staff_discount: "",
             sales_person_name: diningOptionVal || "",
@@ -564,7 +574,6 @@
         return transformed;
     }
 
-    // ----------------------- IRS FILTER -----------------------
     function getIrsRows(fullData) {
         const cardRows = fullData.filter(row => row.payment_method === "Card");
         return cardRows.map(row => ({
@@ -587,14 +596,14 @@
             return;
         }
         const previewRows = dataArray.slice(0, 5);
-        const keyFields = ["transaction_id", "timestamp", "items", "total", "payment_method", "store"];
+        const keyFields = ["transaction_id", "timestamp", "items", "total", "payment_method", "store", "custom_discount"];
         let html = `<table><thead><tr>${keyFields.map(f => `<th>${f}</th>`).join('')}</tr></thead><tbody>`;
         for (const row of previewRows) {
             let itemsPreview = row.items;
             if (itemsPreview && itemsPreview.length > 60) itemsPreview = itemsPreview.substring(0, 60) + '…';
-            html += `<td>${keyFields.map(f => `<td title="${escapeHtml(String(row[f] || ''))}">${escapeHtml(f === 'items' ? itemsPreview : (row[f] || '—').substring(0,40))}</td>`).join('')}</tr>`;
+            html += `<tr>${keyFields.map(f => `<td title="${escapeHtml(String(row[f] || ''))}">${escapeHtml(f === 'items' ? itemsPreview : (row[f] || '—').substring(0,40))}</td>`).join('')}</tr>`;
         }
-        html += `</tbody></table><div style="padding:0.5rem 0.7rem; background:#f8fbfe; font-size:0.7rem;">✅ Cancelled rows removed. Items generated from Total Bill using product master. Total kept: ${dataArray.length}</div>`;
+        html += `</tbody></table><div style="padding:0.5rem 0.7rem; background:#f8fbfe; font-size:0.7rem;">✅ Items generated to reach ≥ total, discount = excess. Total kept: ${dataArray.length}</div>`;
         container.innerHTML = html;
         document.getElementById("rowCountBadge").innerText = `${dataArray.length} rows`;
     }
