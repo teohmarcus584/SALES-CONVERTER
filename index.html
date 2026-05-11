@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-    <title>Smart Sales Transformer | Generate Items from Total Bill</title>
+    <title>Sales Transformer | Auto Items from Total + Correct Date Parsing</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -158,13 +158,6 @@
             font-size: 0.8rem;
             font-weight: 500;
         }
-        .warning-light {
-            background: #fff3e0;
-            border-left: 3px solid #e67e22;
-            padding: 8px 12px;
-            border-radius: 12px;
-            margin: 10px 0;
-        }
     </style>
 </head>
 <body>
@@ -173,7 +166,7 @@
         <div class="flex-between">
             <div>
                 <h1>🧾 Smart Sales Transformer</h1>
-                <div class="sub">Generate items from Total Bill (ignores original Description)</div>
+                <div class="sub">Items generated from total bill + UTC date conversion (AM/PM → ISO)</div>
             </div>
             <div class="info-badge">💳 IRS = Only "Card" transactions</div>
         </div>
@@ -183,7 +176,7 @@
         <div style="margin: 1rem 0 0.5rem 0;">
             <div class="file-zone" id="productDropZone">
                 📦 1. Upload Product Master CSV (id, name, price)<br>
-                <span class="small-note">Required columns: id, name, price (case‑insensitive). Prices must be numeric (e.g., 38, 75, 109).</span>
+                <span class="small-note">Required columns: id, name, price (case‑insensitive). Prices must be >0.</span>
                 <input type="file" id="productFileInput" accept=".csv" style="display: none;">
             </div>
             <div id="productStatus" class="product-status">⏳ No product master loaded</div>
@@ -193,7 +186,7 @@
         <div>
             <div class="file-zone" id="salesDropZone">
                 🧾 2. Upload POS Sales CSV<br>
-                <span class="small-note">Cancelled rows auto‑skipped. Items will be generated to match the Net sales total.</span>
+                <span class="small-note">Cancelled rows auto‑skipped. Dates like "1/31/25 6:07 PM" → UTC. Items built from total.</span>
                 <input type="file" id="salesFileInput" accept=".csv" style="display: none;">
             </div>
         </div>
@@ -218,10 +211,10 @@
         </div>
     </div>
     <footer>
-        🧾 <strong>New logic:</strong> The original Description column is IGNORED. Instead, we generate a realistic set of items (using your product master) whose total price equals the Net sales amount.<br>
-        🏬 Store codes: "URBAN • LIVING @ GURNEY PARAGON" → gurney_paragon | "… @ SUNSHINE CENTRAL" → sunshine | "… @ QB 1" → queens<br>
-        💳 IRS report = payment_method === "Card" (normalized).<br>
-        ⚙️ If exact total cannot be matched with available products, the closest combination is used (rare).
+        🧾 <strong>Date parsing:</strong> "M/D/YY h:mm AM/PM" (local Malaysia time) → UTC ISO 8601 with milliseconds.<br>
+        🏬 Store mapping: "URBAN • LIVING @ GURNEY PARAGON" → gurney_paragon | "… @ SUNSHINE CENTRAL" → sunshine | "… @ QB 1" → queens<br>
+        ⚙️ <strong>Items generation:</strong> Ignores original Description. Uses product master to pick items that sum to Net sales.<br>
+        💳 IRS report = payment_method === "Card".
     </footer>
 </div>
 
@@ -251,6 +244,54 @@
     let mappedData = [];
     let isDataReady = false;
     let skippedCancelledCount = 0;
+
+    // ----------------------- DATE PARSING (Local Malaysia → UTC) -----------------------
+    function parseLocalDateToUTC(dateStr) {
+        if (!dateStr || dateStr === "") return "";
+
+        let raw = String(dateStr).trim();
+        // Remove any invisible characters
+        raw = raw.replace(/[^\x20-\x7E]/g, '');
+
+        // Try built‑in Date parsing (for Excel serial or standard ISO)
+        let d = new Date(raw);
+        if (!isNaN(d.getTime())) {
+            // If the input didn't contain timezone info, treat as local
+            if (!raw.includes('Z') && !raw.includes('+') && !raw.includes('-')) {
+                const localDate = new Date(raw);
+                const utcDate = new Date(localDate.getTime() - (localDate.getTimezoneOffset() * 60000));
+                return utcDate.toISOString().replace(/\.\d{3}Z$/, '.000Z');
+            }
+            return d.toISOString().replace(/\.\d{3}Z$/, '.000Z');
+        }
+
+        // Manual parsing for "M/D/YY h:mm AM/PM"
+        const match = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})\s+(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+        if (match) {
+            let month = parseInt(match[1], 10);
+            let day = parseInt(match[2], 10);
+            let year = parseInt(match[3], 10);
+            if (year < 100) year += 2000;
+            let hour = parseInt(match[4], 10);
+            let minute = parseInt(match[5], 10);
+            const ampm = match[6].toUpperCase();
+
+            if (ampm === 'PM' && hour !== 12) hour += 12;
+            if (ampm === 'AM' && hour === 12) hour = 0;
+
+            // Build local time string (YYYY-MM-DDTHH:MM:00)
+            const localDateStr = `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}T${String(hour).padStart(2,'0')}:${String(minute).padStart(2,'0')}:00`;
+            const localDate = new Date(localDateStr);
+            if (!isNaN(localDate.getTime())) {
+                // Convert local time to UTC using system offset
+                const utcDate = new Date(localDate.getTime() - (localDate.getTimezoneOffset() * 60000));
+                return utcDate.toISOString().replace(/\.\d{3}Z$/, '.000Z');
+            }
+        }
+
+        // Fallback: return original string
+        return raw;
+    }
 
     // ----------------------- PRODUCT MASTER LOADING -----------------------
     function loadProductMaster(file) {
@@ -301,24 +342,21 @@
     }
 
     // ----------------------- GENERATE ITEMS FROM TOTAL -----------------------
-    // Returns an array of items that sum to targetTotal (or as close as possible)
-    function generateItemsFromTotal(targetTotal, productList) {
+    function generateItemsFromTotal(targetTotal) {
         if (!productList.length) return [];
         if (targetTotal <= 0) return [];
 
-        // Sort products by price descending (greedy approach)
-        const sortedProducts = [...productList].sort((a, b) => b.price - a.price);
+        // Sort products by price descending (greedy)
+        const sorted = [...productList].sort((a, b) => b.price - a.price);
         let remaining = targetTotal;
         const itemsMap = new Map(); // key = product id, value = { product, quantity }
 
-        // Simple greedy: pick largest product that fits, up to reasonable iterations
         let maxAttempts = 100;
         let attempts = 0;
         while (remaining > 0.01 && attempts < maxAttempts) {
             let found = false;
-            for (let product of sortedProducts) {
+            for (let product of sorted) {
                 if (product.price <= remaining + 0.01) {
-                    // Use this product
                     const qty = Math.floor(remaining / product.price);
                     if (qty > 0) {
                         if (itemsMap.has(product.id)) {
@@ -333,8 +371,8 @@
                 }
             }
             if (!found) {
-                // No product fits remaining amount – adjust by adding the smallest product (may exceed slightly)
-                const smallest = sortedProducts[sortedProducts.length - 1];
+                // No product fits – use the smallest product (may overshoot)
+                const smallest = sorted[sorted.length - 1];
                 if (smallest) {
                     if (itemsMap.has(smallest.id)) {
                         itemsMap.get(smallest.id).quantity += 1;
@@ -349,25 +387,17 @@
             attempts++;
         }
 
-        // Convert map to array of items
         const items = [];
         for (let { product, quantity } of itemsMap.values()) {
-            if (quantity > 0) {
-                items.push({
-                    id: product.id,
-                    name: product.name,
-                    quantity: quantity,
-                    price: product.price,
-                    total: product.price * quantity,
-                    free_quantity: 0
-                });
-            }
+            items.push({
+                id: product.id,
+                name: product.name,
+                quantity: quantity,
+                price: product.price,
+                total: product.price * quantity,
+                free_quantity: 0
+            });
         }
-
-        // If remaining > 0.01 and we have a small discrepancy (due to rounding), adjust the last item's price slightly? Not ideal.
-        // Instead, we can just leave as is – the total from items will be slightly different from targetTotal.
-        // But for exact match with the `total` column, we rely on the original Net sales value, not sum of items.
-        // The items array is just for informational purposes; the `total` field remains the original Net sales.
         return items;
     }
 
@@ -395,58 +425,7 @@
         return (val !== undefined && val !== null) ? String(val) : "";
     }
 
-    // ----- DATE NORMALIZATION (ISO 8601 with ms and Z) -----
-    function toISOStringWithMs(dateInput) {
-        if (!dateInput || dateInput === "") return "";
-        let rawStr = String(dateInput).trim();
-        // Excel serial
-        if (/^\d+(\.\d+)?$/.test(rawStr) && parseFloat(rawStr) > 1000 && parseFloat(rawStr) < 100000) {
-            const excelEpoch = new Date(Date.UTC(1899, 11, 30));
-            const days = parseFloat(rawStr);
-            const ms = days * 86400000;
-            const date = new Date(excelEpoch.getTime() + ms);
-            if (!isNaN(date.getTime())) return date.toISOString();
-        }
-        let parsedDate = new Date(rawStr);
-        if (!isNaN(parsedDate.getTime())) {
-            let iso = parsedDate.toISOString();
-            if (iso.includes('Z') && !iso.includes('.') && iso.includes('T')) {
-                iso = iso.replace('Z', '.000Z');
-            } else if (iso.includes('.') && iso.split('.')[1].length < 3) {
-                iso = iso.replace(/\.(\d{1,2})Z/, (_, p1) => '.' + p1.padEnd(3, '0') + 'Z');
-            }
-            return iso;
-        }
-        // fallback regex
-        const patterns = [
-            /^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})(?:\s+(\d{1,2}):(\d{1,2})(?::(\d{1,2})(?:\.(\d{1,3}))?)?)?$/,
-            /^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})(?:\s+(\d{1,2}):(\d{1,2})(?::(\d{1,2})(?:\.(\d{1,3}))?)?)?$/
-        ];
-        for (const regex of patterns) {
-            const match = rawStr.match(regex);
-            if (match) {
-                let year, month, day, hour=0, minute=0, second=0, ms=0;
-                if (match[1].length === 4) {
-                    year = parseInt(match[1],10);
-                    month = parseInt(match[2],10)-1;
-                    day = parseInt(match[3],10);
-                } else {
-                    year = parseInt(match[3],10);
-                    month = parseInt(match[1],10)-1;
-                    day = parseInt(match[2],10);
-                }
-                if (match[4]) hour = parseInt(match[4],10);
-                if (match[5]) minute = parseInt(match[5],10);
-                if (match[6]) second = parseInt(match[6],10);
-                if (match[7]) ms = parseInt(match[7].padEnd(3,'0'),10);
-                const date = new Date(Date.UTC(year, month, day, hour, minute, second, ms));
-                if (!isNaN(date.getTime())) return date.toISOString();
-            }
-        }
-        return rawStr;
-    }
-
-    // ----- STORE NORMALIZATION -----
+    // Store normalisation
     const STORE_NORMALIZATION_MAP = new Map([
         ["URBAN • LIVING @ GURNEY PARAGON", "gurney_paragon"],
         ["URBAN • LIVING @ SUNSHINE CENTRAL", "sunshine"],
@@ -469,7 +448,7 @@
         return trimmed;
     }
 
-    // ----- PAYMENT NORMALIZATION -----
+    // Payment normalisation
     const PAYMENT_NORMALIZATION_MAP = {
         "credit/debit card": "Card",
         "debit card": "Card",
@@ -508,20 +487,15 @@
         const diningOptionVal = getSourceValue(originalRow, "Dining option", headerMap);
         const discountsVal = getSourceValue(originalRow, "Discounts", headerMap);
         
-        const isoTimestamp = toISOStringWithMs(rawDate);
+        const isoTimestamp = parseLocalDateToUTC(rawDate);
         let totalAmount = parseFloat(netSalesVal);
         if (isNaN(totalAmount)) totalAmount = 0;
         
         // Generate items based on total amount using product master
         let itemsJson = "[]";
         if (productList.length && totalAmount > 0) {
-            const generatedItems = generateItemsFromTotal(totalAmount, productList);
+            const generatedItems = generateItemsFromTotal(totalAmount);
             itemsJson = JSON.stringify(generatedItems);
-        } else if (totalAmount === 0) {
-            // Free or zero total – no items
-            itemsJson = "[]";
-        } else if (!productList.length) {
-            itemsJson = "[]";
         }
         
         return {
@@ -592,7 +566,7 @@
         for (const row of previewRows) {
             let itemsPreview = row.items;
             if (itemsPreview && itemsPreview.length > 60) itemsPreview = itemsPreview.substring(0, 60) + '…';
-            html += `<td>${keyFields.map(f => `<td title="${escapeHtml(String(row[f] || ''))}">${escapeHtml(f === 'items' ? itemsPreview : (row[f] || '—').substring(0,40))}</td>`).join('')}</tr>`;
+            html += `<tr>${keyFields.map(f => `<td title="${escapeHtml(String(row[f] || ''))}">${escapeHtml(f === 'items' ? itemsPreview : (row[f] || '—').substring(0,40))}</td>`).join('')}</tr>`;
         }
         html += `</tbody></table><div style="padding:0.5rem 0.7rem; background:#f8fbfe; font-size:0.7rem;">✅ Cancelled rows removed. Items generated from Total Bill using product master. Total kept: ${dataArray.length}</div>`;
         container.innerHTML = html;
