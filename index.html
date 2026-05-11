@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-    <title>Smart Sales Transformer | Fixed – Safe DP, Fallback Greedy</title>
+    <title>Smart Sales Transformer | Robust DP + Greedy Fallback</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -214,7 +214,7 @@
         🧾 <strong>Logic:</strong> Original Description is IGNORED. Items are generated from product master using a DP algorithm to find a combination where sum(price*quantity) is the smallest possible value ≥ Net sales. The excess is stored as <code>custom_discount</code>. The final <code>total</code> column remains the original Net sales.<br>
         🏬 Store codes: "URBAN • LIVING @ GURNEY PARAGON" → gurney_paragon | "… @ SUNSHINE CENTRAL" → sunshine | "… @ QB 1" → queens<br>
         💳 IRS report = payment_method === "Card" (normalized).<br>
-        ⚙️ If no DP combination works (e.g., very large total), a greedy fallback ensures safe output.
+        ⚙️ If DP fails (invalid numbers, too large total), a greedy fallback ensures safe output.
     </footer>
 </div>
 
@@ -295,41 +295,58 @@
         });
     }
 
-    // ----------------------- SAFE DP + FALLBACK -----------------------
+    // ----------------------- ROBUST ITEM GENERATION -----------------------
     function generateItemsFromTotal(targetTotal, productList) {
-        if (!productList.length) return { items: [], customDiscount: 0 };
-        if (targetTotal <= 0) return { items: [], customDiscount: 0 };
-        if (isNaN(targetTotal) || !isFinite(targetTotal)) return { items: [], customDiscount: 0 };
+        // Safety checks
+        if (!Array.isArray(productList) || productList.length === 0) 
+            return { items: [], customDiscount: 0 };
+        if (isNaN(targetTotal) || !isFinite(targetTotal) || targetTotal <= 0) 
+            return { items: [], customDiscount: 0 };
 
-        // Extract unique prices and representative product
+        // Filter products with positive finite price
+        const validProducts = productList.filter(p => p.price > 0 && isFinite(p.price));
+        if (validProducts.length === 0) return { items: [], customDiscount: 0 };
+
+        // Extract unique prices and representative product (any)
         const priceToProduct = new Map();
-        for (const prod of productList) {
-            if (prod.price > 0 && isFinite(prod.price)) {
-                if (!priceToProduct.has(prod.price)) {
-                    priceToProduct.set(prod.price, prod);
-                }
+        for (const prod of validProducts) {
+            if (!priceToProduct.has(prod.price)) {
+                priceToProduct.set(prod.price, prod);
             }
         }
-        if (priceToProduct.size === 0) return { items: [], customDiscount: 0 };
-
         const uniquePrices = Array.from(priceToProduct.keys()).sort((a,b) => a - b);
         const maxPrice = uniquePrices[uniquePrices.length - 1];
-        // Upper bound for DP: targetTotal + maxPrice
-        let maxSum = targetTotal + maxPrice;
-        // Guard against huge or invalid array length
-        if (!isFinite(maxSum) || maxSum > 50000) {
-            // Fallback: greedy (largest product repeated)
-            const largestProduct = productList.reduce((a,b) => a.price > b.price ? a : b);
-            const qty = Math.ceil(targetTotal / largestProduct.price);
+        if (!isFinite(maxPrice) || maxPrice <= 0) {
+            // Fallback greedy using the largest product
+            const largest = validProducts.reduce((a,b) => a.price > b.price ? a : b);
+            const qty = Math.ceil(targetTotal / largest.price);
             const items = [{
-                id: largestProduct.id,
-                name: largestProduct.name,
+                id: largest.id,
+                name: largest.name,
                 quantity: qty,
-                price: largestProduct.price,
-                total: largestProduct.price * qty,
+                price: largest.price,
+                total: largest.price * qty,
                 free_quantity: 0
             }];
-            const excess = (largestProduct.price * qty) - targetTotal;
+            const excess = (largest.price * qty) - targetTotal;
+            return { items, customDiscount: excess };
+        }
+
+        let maxSum = targetTotal + maxPrice;
+        // Avoid huge / invalid array lengths
+        if (!isFinite(maxSum) || maxSum < 0 || maxSum > 50000) {
+            // Fallback greedy
+            const largest = validProducts.reduce((a,b) => a.price > b.price ? a : b);
+            const qty = Math.ceil(targetTotal / largest.price);
+            const items = [{
+                id: largest.id,
+                name: largest.name,
+                quantity: qty,
+                price: largest.price,
+                total: largest.price * qty,
+                free_quantity: 0
+            }];
+            const excess = (largest.price * qty) - targetTotal;
             return { items, customDiscount: excess };
         }
 
@@ -367,16 +384,16 @@
             finalMap = dp[bestSum];
         } else {
             // Fallback greedy
-            const largestProduct = productList.reduce((a,b) => a.price > b.price ? a : b);
-            const qty = Math.ceil(targetTotal / largestProduct.price);
+            const largest = validProducts.reduce((a,b) => a.price > b.price ? a : b);
+            const qty = Math.ceil(targetTotal / largest.price);
             finalMap = new Map();
-            finalMap.set(largestProduct.id, qty);
-            bestExcess = (largestProduct.price * qty) - targetTotal;
+            finalMap.set(largest.id, qty);
+            bestExcess = (largest.price * qty) - targetTotal;
         }
 
         const items = [];
         for (let [prodId, qty] of finalMap.entries()) {
-            const product = productList.find(p => p.id === prodId);
+            const product = validProducts.find(p => p.id === prodId);
             if (product) {
                 items.push({
                     id: product.id,
