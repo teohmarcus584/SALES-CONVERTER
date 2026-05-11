@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-    <title>Smart Sales Transformer | Robust DP + Greedy Fallback</title>
+    <title>Smart Sales Transformer | Ultimate Safety</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -295,19 +295,39 @@
         });
     }
 
-    // ----------------------- ROBUST ITEM GENERATION -----------------------
+    // ----------------------- ULTRA ROBUST ITEM GENERATION -----------------------
     function generateItemsFromTotal(targetTotal, productList) {
-        // Safety checks
-        if (!Array.isArray(productList) || productList.length === 0) 
+        // SAFETY CHECKS
+        if (!Array.isArray(productList) || productList.length === 0) {
             return { items: [], customDiscount: 0 };
-        if (isNaN(targetTotal) || !isFinite(targetTotal) || targetTotal <= 0) 
+        }
+        if (typeof targetTotal !== 'number' || isNaN(targetTotal) || !isFinite(targetTotal) || targetTotal <= 0) {
             return { items: [], customDiscount: 0 };
+        }
 
         // Filter products with positive finite price
-        const validProducts = productList.filter(p => p.price > 0 && isFinite(p.price));
-        if (validProducts.length === 0) return { items: [], customDiscount: 0 };
+        const validProducts = productList.filter(p => p.price > 0 && isFinite(p.price) && typeof p.price === 'number');
+        if (validProducts.length === 0) {
+            return { items: [], customDiscount: 0 };
+        }
 
-        // Extract unique prices and representative product (any)
+        // Greedy fallback function (repeated largest product)
+        const greedyFallback = () => {
+            const largest = validProducts.reduce((a,b) => a.price > b.price ? a : b);
+            const qty = Math.ceil(targetTotal / largest.price);
+            const items = [{
+                id: largest.id,
+                name: largest.name,
+                quantity: qty,
+                price: largest.price,
+                total: largest.price * qty,
+                free_quantity: 0
+            }];
+            const excess = (largest.price * qty) - targetTotal;
+            return { items, customDiscount: excess };
+        };
+
+        // Extract unique prices and one representative product per price
         const priceToProduct = new Map();
         for (const prod of validProducts) {
             if (!priceToProduct.has(prod.price)) {
@@ -317,40 +337,16 @@
         const uniquePrices = Array.from(priceToProduct.keys()).sort((a,b) => a - b);
         const maxPrice = uniquePrices[uniquePrices.length - 1];
         if (!isFinite(maxPrice) || maxPrice <= 0) {
-            // Fallback greedy using the largest product
-            const largest = validProducts.reduce((a,b) => a.price > b.price ? a : b);
-            const qty = Math.ceil(targetTotal / largest.price);
-            const items = [{
-                id: largest.id,
-                name: largest.name,
-                quantity: qty,
-                price: largest.price,
-                total: largest.price * qty,
-                free_quantity: 0
-            }];
-            const excess = (largest.price * qty) - targetTotal;
-            return { items, customDiscount: excess };
+            return greedyFallback();
         }
 
         let maxSum = targetTotal + maxPrice;
-        // Avoid huge / invalid array lengths
-        if (!isFinite(maxSum) || maxSum < 0 || maxSum > 50000) {
-            // Fallback greedy
-            const largest = validProducts.reduce((a,b) => a.price > b.price ? a : b);
-            const qty = Math.ceil(targetTotal / largest.price);
-            const items = [{
-                id: largest.id,
-                name: largest.name,
-                quantity: qty,
-                price: largest.price,
-                total: largest.price * qty,
-                free_quantity: 0
-            }];
-            const excess = (largest.price * qty) - targetTotal;
-            return { items, customDiscount: excess };
+        // Validate maxSum: must be safe integer, non-negative, not too large
+        if (!Number.isSafeInteger(maxSum) || maxSum < 0 || maxSum > 50000 || isNaN(maxSum) || !isFinite(maxSum)) {
+            return greedyFallback();
         }
 
-        // DP array: stores the best combination for each sum (as Map of productId -> quantity)
+        // DP array: store best combination for each sum (as Map of productId -> quantity)
         const dp = new Array(maxSum + 1).fill(null);
         dp[0] = new Map();
 
@@ -380,21 +376,16 @@
         }
 
         let finalMap;
-        if (bestSum !== null) {
+        if (bestSum !== null && dp[bestSum] !== null) {
             finalMap = dp[bestSum];
         } else {
-            // Fallback greedy
-            const largest = validProducts.reduce((a,b) => a.price > b.price ? a : b);
-            const qty = Math.ceil(targetTotal / largest.price);
-            finalMap = new Map();
-            finalMap.set(largest.id, qty);
-            bestExcess = (largest.price * qty) - targetTotal;
+            return greedyFallback();
         }
 
         const items = [];
         for (let [prodId, qty] of finalMap.entries()) {
             const product = validProducts.find(p => p.id === prodId);
-            if (product) {
+            if (product && qty > 0) {
                 items.push({
                     id: product.id,
                     name: product.name,
@@ -405,6 +396,7 @@
                 });
             }
         }
+        if (items.length === 0) return greedyFallback();
         items.sort((a,b) => b.price - a.price);
         return { items, customDiscount: bestExcess };
     }
